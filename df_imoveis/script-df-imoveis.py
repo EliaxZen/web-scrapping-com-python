@@ -5,7 +5,7 @@ import pandas as pd
 lista_de_imoveis = []
 pagina = 1
 
-for pagina in range(245):
+for pagina in range(247):
     pagina += 1
     resposta = requests.get(f'https://www.dfimoveis.com.br/aluguel/df/todos/imoveis?pagina={pagina}')
 
@@ -33,12 +33,16 @@ for pagina in range(245):
         # Metro quadrado
         metro = imovel.find('li', attrs={'class': 'm-area'})
 
-        if (subtitulo):
-            lista_de_imoveis.append([titulo.text.strip(), subtitulo.text.strip() , link['href'], preco.text, metro.text.replace('m²', '').strip()])
-        else:
-            lista_de_imoveis.append([titulo.text, '',link['href'], preco.text, metro.text.replace('m²', '').strip()])
+        # quartos, suíte, vagas
+        quarto_suite_vaga = imovel.find('ul', attrs={'class': 'new-details-ul'})
+        lista = quarto_suite_vaga.text.split()
+        
+        
+
+        lista_de_imoveis.append([titulo.text.strip(), subtitulo.text.strip() , link['href'], preco.text, metro.text.replace('m²', '').strip(), lista])
+        
 
 
 
-df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo', 'Link', 'Preço', 'Metro Quadrado'])
-df_imovel.to_excel('primeiro_web_scrapping.xlsx', index=False)
+df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo', 'Link', 'Preço','Metro Quadrado', 'Metro, Quarto, Suite, Vaga'])
+df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\df_imoveis\df_imoveis_scrapping.xlsx', index=False)
