@@ -1,6 +1,6 @@
 from selenium import webdriver
 
-navegador = webdriver.Chrome()
+navegador = webdriver.Edge()
 
 navegador.get('https://www.thaisimobiliaria.com.br/')
 

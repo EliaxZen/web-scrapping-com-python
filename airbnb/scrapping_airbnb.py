@@ -1,32 +1,26 @@
+from time import sleep
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.edge.options import Options
-from time import sleep
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
+driver_path = ChromeDriverManager().install()
 
-#options.add_argument('--headless')
+# Create a service object with the driver path
+service = Service(driver_path)
 
+navegador = webdriver.Chrome(service=service)
 
-navegador = webdriver.Edge()
+navegador.get('https://www.airbnb.com.br/s/Brasilia--Bras%C3%ADlia-~-Federal-District--Brazil/homes?tab_id=home_tab&refinement_paths%5B%5D=%2Fhomes&flexible_trip_lengths%5B%5D=one_week&monthly_start_date=2024-04-01&monthly_length=3&monthly_end_date=2024-07-01&price_filter_input_type=0&channel=EXPLORE&query=Brasilia%2C%20Bras%C3%ADlia%20-%20Federal%20District&place_id=ChIJMY_byXY3WpMRrGc50eIQKSk&date_picker_type=calendar&source=structured_search_input_header&search_type=autocomplete_click')
 
-navegador.get('https://www.thaisimobiliaria.com.br/')
+sleep(2)
 
-sleep(1)
+input_place = navegador.find_element(By.CSS_SELECTOR, 'a')
+print(input_place['href'])
 
-input_place = navegador.find_element_by_tag_name('input')
-input_place.send_keys('São Paulo')
-input_place.submit()
-
-
-# site = BeautifulSoup(navegador.page_source, 'html.parser')
-
-# print(site.prettify())
-
-
-
-
-
+navegador.quit()
 
 
 
