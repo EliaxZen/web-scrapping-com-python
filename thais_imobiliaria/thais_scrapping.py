@@ -17,6 +17,7 @@ navegador = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install
 
 navegador.get('https://www.thaisimobiliaria.com.br/imoveis/a-venda/brasilia')
 
+sleep(2)
 while True:
     try:
         # Espera até que o elemento dos cookies desapareça
@@ -28,12 +29,11 @@ while True:
         botao_ver_mais.click()
         
         # Pausa temporária para aguardar o carregamento da próxima página
-        sleep(10)  # Ajuste o tempo conforme necessário
+        sleep(3)  # Ajuste o tempo conforme necessário
         
     except NoSuchElementException:
         # Se o botão não estiver mais presente, saia do loop
         break
-sleep(20)
 
 page_content = navegador.page_source
 
@@ -46,12 +46,14 @@ sleep(20)
 for imovel in imoveis:
         # Título do imóvel
         titulo = imovel.find('h2', attrs={'class': 'card_split_vertically__location'})
+        titulo_text = titulo.text.strip() if titulo else None
 
         # Link do imovel
         link = 'https://www.thaisimobiliaria.com.br' + imovel['href']
         
         # Tipo do imóvel
         tipo = imovel.find('p', attrs={'class': 'card_split_vertically__type'})
+        tipo_text = tipo.text.strip() if tipo else None
 
         # Preco aluguel
         preco = None
@@ -68,6 +70,8 @@ for imovel in imoveis:
 
         # Metro quadrado
         metro = imovel.find('li', attrs={'class': 'card_split_vertically__spec'})
+        metro_text = metro.text.replace('m²', '').strip() if metro else None
+
 
         # quartos, suíte, vagas
         quarto_suite_vaga = imovel.find('ul', attrs={'class': 'card_split_vertically__specs'})
@@ -75,9 +79,12 @@ for imovel in imoveis:
         suite = quarto_suite_vaga.text.replace('m²', '')[2:3]
         banheiro = quarto_suite_vaga.text.replace('m²', '')[3:4]
         vaga = quarto_suite_vaga.text.replace('m²', '')[4:5]
+        quarto_text = quarto.strip() if quarto else None
+        suite_text = suite.strip() if suite else None
+        vaga_text = vaga.strip() if vaga else None
         
 
-        lista_de_imoveis.append([titulo.text.strip(), tipo.text.strip() , link, preco.text, metro.text.replace('m²', '').strip(), quarto, suite, banheiro, vaga])
+        lista_de_imoveis.append([titulo_text, tipo_text, link, preco, metro_text, quarto_text, suite_text, banheiro, vaga_text])
 
 
 df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Tipo', 'Link', 'Preço','Metro Quadrado', 'Quarto', 'Suite', 'Banheiro', 'Vaga'])
