@@ -7,28 +7,42 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException
 
-driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
-
-driver_path = ChromeDriverManager().install()
+navegador = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
 
 # Create a service object with the driver path
-service = Service(driver_path)
-
-navegador = webdriver.Chrome(service=service)
 
 navegador.get('https://www.thaisimobiliaria.com.br/imoveis/a-venda/brasilia')
 
-sleep(2)
+while True:
+    try:
+        # Espera até que o elemento dos cookies desapareça
+        WebDriverWait(navegador, 20).until(EC.invisibility_of_element_located((By.ID, "cookies-component")))
+        # Verifica se o botão "Ver Mais" está presente na página
+        botao_ver_mais = navegador.find_element(By.CSS_SELECTOR, '.btn.btn-md.btn-primary.btn-next')
+        
+        # Se o botão estiver presente, clique nele
+        botao_ver_mais.click()
+        
+        # Pausa temporária para aguardar o carregamento da próxima página
+        sleep(10)  # Ajuste o tempo conforme necessário
+        
+    except NoSuchElementException:
+        # Se o botão não estiver mais presente, saia do loop
+        break
+sleep(20)
 
 page_content = navegador.page_source
 
 site = BeautifulSoup(page_content, 'html.parser')
-
 imoveis = site.findAll('a', attrs={'class': 'card_split_vertically borderHover'})
 
 lista_de_imoveis = []
 
+sleep(20)
 for imovel in imoveis:
         # Título do imóvel
         titulo = imovel.find('h2', attrs={'class': 'card_split_vertically__location'})
@@ -40,8 +54,17 @@ for imovel in imoveis:
         tipo = imovel.find('p', attrs={'class': 'card_split_vertically__type'})
 
         # Preco aluguel
+        preco = None
         preco_area = imovel.find('div', attrs={'class': 'card_split_vertically__value-container'})
-        preco = preco_area.find('p', attrs={'class': 'card_split_vertically__value'})
+        if preco_area:
+                preco = preco_area.find('p', attrs={'class': 'card_split_vertically__value'})
+                if preco:
+                        preco = preco.text.strip()
+                else:
+                        preco = "Preço não especificado"
+        else:
+                preco = "Preço não especificado"
+
 
         # Metro quadrado
         metro = imovel.find('li', attrs={'class': 'card_split_vertically__spec'})
@@ -53,9 +76,9 @@ for imovel in imoveis:
         banheiro = quarto_suite_vaga.text.replace('m²', '')[3:4]
         vaga = quarto_suite_vaga.text.replace('m²', '')[4:5]
         
-        
 
         lista_de_imoveis.append([titulo.text.strip(), tipo.text.strip() , link, preco.text, metro.text.replace('m²', '').strip(), quarto, suite, banheiro, vaga])
+
 
 df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Tipo', 'Link', 'Preço','Metro Quadrado', 'Quarto', 'Suite', 'Banheiro', 'Vaga'])
 
@@ -63,4 +86,3 @@ df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com
 
 print(df_imovel)
 navegador.quit()
-driver.quit()
