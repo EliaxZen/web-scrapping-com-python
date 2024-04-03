@@ -3,15 +3,14 @@ from bs4 import BeautifulSoup
 import pandas as pd
 
 lista_de_imoveis = []
-pagina = 1
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
 }
 
-for pagina in range(2200):
+for pagina in range(721):
     pagina += 1
-    url = f'https://www.wimoveis.com.br/imoveis-venda-distrito-federal-pagina-{pagina}.html'
+    url = f'https://www.wimoveis.com.br/terrenos-venda-distrito-federal-pagina-{pagina}.html'
     resposta = requests.get(url, headers=headers)
     conteudo = resposta.content
 
@@ -43,15 +42,22 @@ for pagina in range(2200):
 
         # quartos, suíte, vagas
         quarto_suite_vaga = imovel.find('h3', attrs={'data-qa': 'POSTING_CARD_FEATURES'})
-        lista = quarto_suite_vaga.text.split() if quarto_suite_vaga else None
+        if quarto_suite_vaga:
+            lista = quarto_suite_vaga.find_all('span')
+            quarto = banheiro = vaga = None
 
-        lista_de_imoveis.append([titulo_text, subtitulo_text, link, preco_text, metro_text, lista])
+            for item in lista:
+                if 'quarto' in item.text.lower():
+                    quarto = item.text
+                elif 'banheiro' in item.text.lower():
+                    banheiro = item.text
+                elif 'vaga' in item.text.lower():
+                    vaga = item.text
+        else:
+            quarto = banheiro = vaga = None
 
+        lista_de_imoveis.append([titulo_text, subtitulo_text, link, preco_text, metro_text, quarto, banheiro, vaga])
 
-        
-
-
-
-df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo', 'Link', 'Preço','Metro Quadrado', 'Metro, Quarto, Suite, Vaga'])
-df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\wimoveis\wimoveis_scrapping_venda.xlsx', index=False)
-print(resposta)
+df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo', 'Link', 'Preço', 'Metro Quadrado', 'Quarto', 'Banheiro', 'Vaga'])
+df_imovel.to_excel('wimoveis_scrapping_venda_lote_terreno.xlsx', index=False)
+print(df_imovel)
