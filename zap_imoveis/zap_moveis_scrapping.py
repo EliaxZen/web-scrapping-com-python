@@ -30,9 +30,7 @@ for pagina in range(1400):
         subtitulo_text = subtitulo.text.strip() if subtitulo else None
 
         # Link do imovel
-        # Link do imovel
         link = imovel['href']
-
 
         # Preco aluguel
         preco_area = imovel.find('div', attrs={'class': 'listing-price'})
@@ -44,33 +42,25 @@ for pagina in range(1400):
         metro = metro_area.find('p', itemprop='floorSize') if metro_area else None
         metro_text = metro.text.replace('m²', '').strip() if metro else 0
 
-        # quartos, banheiro, vagas
-        # quarto_banheiro_vaga = imovel.find('section', attrs={'class': 'card__amenities'})
-        # lista = quarto_banheiro_vaga.text.replace('m²', '').split() if quarto_banheiro_vaga else None
-
         # Quartos
         quarto = imovel.find('p', itemprop='numberOfRooms') if metro_area else None
         quarto_text = quarto.text if quarto else 0
-        
+
         # Banheiros
         banheiro = metro_area.find('p', itemprop='numberOfBathroomsTotal') if metro_area else None
         banheiro_text = banheiro.text if banheiro else 0
-        
+
         # Vagas/Garagem
         garagem = metro_area.find('p', itemprop='numberOfParkingSpaces') if metro_area else None
         garagem_text = garagem.text if garagem else 0
-        
-        
-        
-        lista_de_imoveis.append([titulo_text, subtitulo_text, link, preco_text, metro_text, quarto_text, banheiro_text, garagem_text])
-        #lista_de_imoveis.append([titulo_text, subtitulo_text, link, preco_text, lista])
-
 
         
+            
 
-
+        # Check if 'Quarto', 'Banheiro', or 'Vaga' contains a hyphen
+        if '-' not in str(metro_text) and '-' not in str(quarto_text) and '-' not in str(banheiro_text) and '-' not in str(garagem_text) and 'Valor sob Consulta' not in str(preco_text):
+            lista_de_imoveis.append([titulo_text, subtitulo_text, link, preco_text, metro_text, quarto_text, banheiro_text, garagem_text])
 
 df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo/Setor', 'Link', 'Preço','Metro Quadrado', 'Quarto', 'Banheiro', 'Vaga'])
 df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\zap_imoveis\zap_imoveis_teste.xlsx', index=False)
-print(resposta)
 print(df_imovel)
