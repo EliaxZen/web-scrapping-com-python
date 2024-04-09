@@ -6,11 +6,12 @@ import re
 import numpy as np
 
 lista_de_imoveis = []
-pagina = 1
+passou_aqui = 0
 
-for pagina in range(1400):
-    pagina += 1
-    resposta = requests.get(f'https://www.dfimoveis.com.br/venda/df/todos/imoveis?pagina={pagina}')
+for pagina in range(1, 242):
+    passou_aqui += 1
+    print(f'Url:{passou_aqui}')
+    resposta = requests.get(f'https://www.dfimoveis.com.br/aluguel/df/todos/imoveis?pagina={pagina}')
 
     conteudo = resposta.content.decode('utf-8', 'replace')
 
@@ -80,23 +81,21 @@ df_imovel['Vaga'] = df_imovel['Vaga'].str.extract(r'(\d+)', expand=False).fillna
 # Add new column 'M2' and calculate the division
 df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Metro Quadrado']
 
-# Seu DataFrame
-df_imovel = pd.read_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\df_imoveis\df_imoveis_df_todas_cidades_venda_2.xlsx')
 
 # Função para extrair o setor da string de título
 def extrair_setor(titulo):
     # Lista de setores
     setores = [
+        'PLANO PILOTO','GAMA','TAGUATINGA','BRAZLÂNDIA','SOBRADINHO','PLANALTINA','PARANOÁ','NÚCLEO BANDEIRANTE','CEILÂNDIA','GUARÁ','CRUZEIRO',
+        'SAMAMBAIA','SANTA MARIA','SÃO SEBASTIÃO','RECANTO DAS EMAS','LAGO SUL','RIACHO FUNDO','LAGO NORTE','CANDANGOLÂNDIA','ÁGUAS CLARAS',
+        'RIACHO FUNDO II','SUDOESTE/OCTOGONAL','VARJÃO','PARK WAY','SCIA','VICENTE PIRES','FERCAL'
         'ADE', 'SRTVS', 'STN', 'SMT', 'SRB', 'SRTVN', 'SQ', 'SQB', 'SQNW', 'SMI', 'SMS', 'SMSE', 'SMDB', 'SMHN', 'SHVG',
         'SIN', 'SMAS', 'SIA', 'SHTS', 'SHTN', 'SHLN', 'SHLS', 'SDN', 'SGCV', 'SHIP', 'SDS', 'QRI', 'QRO', 'QS', 'AE', 'AC', 
-        'QSA', 'QSB', 'QSC', 'QSE', 'QSF', 'AV', 'AR', 'C', 'CNA', 'CNC', 'CND', 'CNF', 'CNG','CNM', 'CNN', 'CNR', 'CSA', 'CSC',
+        'QSA', 'QSB', 'SHVP', 'QSC', 'QSE', 'QSF', 'AV', 'AR', 'C', 'CNA', 'CNC', 'CND', 'CNF', 'CNG','CNM', 'CNN', 'CNR', 'CSA', 'CSC',
         'CSD', 'CSF' 'AeB', 'AEMN', 'AOS', 'APO', 'ARIE', 'AVPR', 'BOT', 'BSB', 'CA', 'CADF', 'CCSW', 'CEN', 'CES', 'CE-UnB', 'CL',
-        'CLN', 'SAUS', 'SCSV', 'EQ','EQNL', 'EQNN', 'EQNP', 'EQSW' 'EQNO', 'CLRN', 'CLS', 'CLSW', 'CRN', 'CRS', 'EMI', 'EMO', 'EPAA',
-        'EPAC', 'EPAR', 'EPCA', 'EPCL', 'EPCT', 'EPCV', 'EPDB',
-        'EPGU', 'ES', 'EPIA', 'EPIB', 'EPIG', 'EPIP', 'EPJK', 'EPNA', 'QNH', 'QNJ', 'QNL', 'EPNB', 'EPPN', 'EPPR', 'EPTG',
-        'EPTM', 'EPTT', 'EPUB', 'EPVB',
-        'EPVL', 'QBR', 'QD', 'QMS', 'QNB', 'QNC', 'QND', 'QNE', 'QNF', 'EPVP', 'EQN', 'EQS', 'ERL', 'ERN', 'ERS', 'ERW', 'ESAF',
-        'ETO', 'ML', 'PCH', 'PFB', 'PFR', 'PMU', 'PqEAT',
+        'CLN', 'SAUS', 'SCSV', 'EQ','EQNL', 'EQNN', 'EQNP', 'EQSW' 'EQNO', 'CLRN', 'CLS', 'CLSW', 'CRN', 'CRS', 'EMI', 'EMO', 'EPAA','EPAC', 'EPAR', 'EPCA', 'EPCL', 'EPCT', 'EPCV', 'EPDB',
+        'EPGU', 'SCN', 'ES', 'EPIA', 'EPIB', 'EPIG', 'EPIP', 'EPJK', 'EPNA', 'QNH', 'QNJ', 'QNL', 'EPNB', 'EPPN', 'EPPR', 'EPTG',
+        'EPTM', 'EPTT', 'EPUB', 'EPVB','EPVL', 'QBR', 'QD', 'QMS', 'QNB', 'QNC', 'QND', 'QNE', 'QNF', 'EPVP', 'EQN', 'EQS', 'ERL', 'ERN', 'ERS', 'ERW', 'ESAF','ETO', 'ML', 'PCH', 'PFB', 'PFR', 'PMU', 'PqEAT',
         'PqEB', 'PqEN', 'PqNB', 'PTP', 'QELC', 'QI', 'QL', 'QMSW', 'QRSW', 'RER-IBGE', 'SAAN', 'SAFN', 'SAFS', 'SAI', 'SO', 'SAIN',
         'SAIS', 'QNQ', 'QNR', 'SAM', 'SAN e SAUN', 'SAS e SAUS', 'SBN', 'SBS', 'SCEEN', 'SCEES', 'SCEN', 'SCES', 'SCIA', 'SCLRN', 'SCN',
         'SCRN', 'SCRS', 'SCS', 'SCTN', 'SCTS', 'SDC', 'SDMC', 'SDN', 'SDS', 'SEDB', 'SEN', 'SEPN', 'SEPS', 'SES', 'SEUPS',
@@ -107,7 +106,7 @@ def extrair_setor(titulo):
         'SQN', 'SQNW', 'SQS', 'SQSW', 'SRES', 'SRIA', 'SRPN', 'SRPS', 'SRTVN', 'SRTVS', 'STN', 'STRC', 'STS', 'UnB', 'VPLA',
         'ZC', 'ZCA', 'ZE', 'ZfN', 'ZI', 'ZR', 'ZV', 'AE', 'AOS', 'CL', 'CLN', 'CLS', 'CLSW', 'CRS', 'EMI', 'EPDB', 'EPTG', 'EQN',
         'EQS', 'ML', 'QI', 'QL', 'QRSW', 'SAN', 'SAS', 'SBN', 'SBS', 'SCEN', 'SCES', 'SCLRN', 'SCN', 'SCS', 'SDN', 'SDS', 'SEN',
-        'SEPN', 'SEPS', 'SES', 'SGAN', 'SGAS', 'SGON', 'SHIP', 'SHIN', 'SHIS', 'SHLN', 'SHLS', 'SHN', 'SHS', 'SHTN', 'SAIN', 'SAIS',
+        'SEPN','SCLN', 'SEPS', 'SES', 'SGAN', 'SGAS', 'SGON', 'SHIP', 'SHIN', 'SHIS', 'SHLN', 'SHLS', 'SHN', 'SHS', 'SHTN', 'SAIN', 'SAIS',
         'SIA', 'SIG', 'SMDB', 'SMHN', 'SMHS', 'SMLN', 'SMU', 'SQN', 'SQS', 'SQSW', 'SRTVN', 'SRTVS', 'QC', 'QE', 'SGCV', 'QN', 'EQRSW',
         'CLNW', 'QNP', 'QNO', 'QNA', 'CRNW', 'QR', 'CSG', 'QNG', 'CNB', 'QSD', 'QNN', 'CSB', 'QNM', 'ADE', 'AE', 'AeB', 'AEMN',
         'AOS', 'APO', 'ARIE', 'AVPR', 'BOT', 'BSB', 'CA', 'CADF', 'CCSW', 'CEN', 'CES', 'CE-UnB', 'CL','SHLN', 'SGCV',
@@ -189,9 +188,9 @@ def extrair_setor(titulo):
     
     # Extrair as palavras individuais do título
     palavras = titulo.split()
-    
+    palavras_upper = [palavra.upper() for palavra in palavras]
     # Encontrar a primeira sigla que corresponde a um setor
-    for palavra in palavras:
+    for palavra in palavras_upper:
         if palavra in setores:
             return palavra
     
@@ -205,5 +204,5 @@ df_imovel['Setor'] = df_imovel['Título'].apply(extrair_setor)
 print(df_imovel)
 
 # Write DataFrame to Excel file
-df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\df_imoveis\df_imoveis_df_todas_cidades_venda_com_setor.xlsx', index=False)
+df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\df_imoveis\df_imoveis_df_aluguel_04_2024.xlsx', index=False)
 
