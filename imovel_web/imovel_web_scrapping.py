@@ -1,4 +1,5 @@
 from curses.ascii import alt
+from distrito_federal_setor import setores
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -13,20 +14,24 @@ passou_aqui = 0
 
 # Headers customizados
 headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+    'Referer': 'https://www.imovelweb.com.br/',
 }
 
 # Usando sessões
 with requests.Session() as s:
     s.headers.update(headers)
 
-
-for pagina in range(1, 385):
+for pagina in range(1, 392):
     passou_aqui += 1
     print(f'Passou aqui:{passou_aqui}')
     url = f'https://www.imovelweb.com.br/casas-terrenos-rurais-comerciais-apartamentos-lancamentos-horizontais-lancamentos-verticais-lancamentos-horizontais-verticais-lotes-edificios-condominios-de-casas-condominios-de-edificios-lancamentos-na-praia-lancamentos-no-campo-lancamentos-comerciais-aluguel-distrito-federal-pagina-{pagina}.html'
-    resposta = s.get(url)
-    #  # Levanta um erro se a requisição falhar
+    try:
+        resposta = s.get(url)
+        resposta.raise_for_status()  # Levanta um erro se a requisição falhar
+    except requests.exceptions.RequestException as e:
+        print(f'Erro ao acessar a página: {e}')
+        continue
 
     conteudo = resposta.content
     site = BeautifulSoup(conteudo, 'html.parser')
@@ -104,108 +109,6 @@ df_imovel[colunas_para_preencher] = df_imovel[colunas_para_preencher].fillna(0)
 
 # Função para extrair o setor da string de título
 def extrair_setor(titulo):
-    # Lista de setores
-    setores = [
-        'PLANO PILOTO','GAMA','TAGUATINGA','BRAZLÂNDIA','SOBRADINHO','PLANALTINA','PARANOÁ','NÚCLEO BANDEIRANTE','CEILÂNDIA','GUARÁ','CRUZEIRO',
-        'SAMAMBAIA','SANTA MARIA','SÃO SEBASTIÃO','RECANTO DAS EMAS','LAGO SUL','RIACHO FUNDO','LAGO NORTE','CANDANGOLÂNDIA','ÁGUAS CLARAS',
-        'RIACHO FUNDO II','SUDOESTE/OCTOGONAL','VARJÃO','PARK WAY','SCIA','VICENTE PIRES','FERCAL'
-        'ADE', 'SRTVS', 'STN', 'SMT', 'SRB', 'SRTVN', 'SQ', 'SQB', 'SQNW', 'SMI', 'SMS', 'SMSE', 'SMDB', 'SMHN', 'SHVG',
-        'SIN', 'SMAS', 'SIA', 'SHTS', 'SHTN', 'SHLN', 'SHLS', 'SDN', 'SGCV', 'SHIP', 'SDS', 'QRI', 'QRO', 'QS', 'AE', 'AC', 
-        'QSA', 'QSB', 'SHVP', 'QSC', 'QSE', 'QSF', 'AV', 'AR', 'C', 'CNA', 'CNC', 'CND', 'CNF', 'CNG','CNM', 'CNN', 'CNR', 'CSA', 'CSC',
-        'CSD', 'CSF' 'AeB', 'AEMN', 'AOS', 'APO', 'ARIE', 'AVPR', 'BOT', 'BSB', 'CA', 'CADF', 'CCSW', 'CEN', 'CES', 'CE-UnB', 'CL',
-        'CLN', 'SAUS', 'SCSV', 'EQ','EQNL', 'EQNN', 'EQNP', 'EQSW' 'EQNO', 'CLRN', 'CLS', 'CLSW', 'CRN', 'CRS', 'EMI', 'EMO', 'EPAA','EPAC', 'EPAR', 'EPCA', 'EPCL', 'EPCT', 'EPCV', 'EPDB',
-        'EPGU', 'SCN', 'ES', 'EPIA', 'EPIB', 'EPIG', 'EPIP', 'EPJK', 'EPNA', 'QNH', 'QNJ', 'QNL', 'EPNB', 'EPPN', 'EPPR', 'EPTG',
-        'EPTM', 'EPTT', 'EPUB', 'EPVB','EPVL', 'QBR', 'QD', 'QMS', 'QNB', 'QNC', 'QND', 'QNE', 'QNF', 'EPVP', 'EQN', 'EQS', 'ERL', 'ERN', 'ERS', 'ERW', 'ESAF','ETO', 'ML', 'PCH', 'PFB', 'PFR', 'PMU', 'PqEAT',
-        'PqEB', 'PqEN', 'PqNB', 'PTP', 'QELC', 'QI', 'QL', 'QMSW', 'QRSW', 'RER-IBGE', 'SAAN', 'SAFN', 'SAFS', 'SAI', 'SO', 'SAIN',
-        'SAIS', 'QNQ', 'QNR', 'SAM', 'SAN e SAUN', 'SAS e SAUS', 'SBN', 'SBS', 'SCEEN', 'SCEES', 'SCEN', 'SCES', 'SCIA', 'SCLRN', 'SCN',
-        'SCRN', 'SCRS', 'SCS', 'SCTN', 'SCTS', 'SDC', 'SDMC', 'SDN', 'SDS', 'SEDB', 'SEN', 'SEPN', 'SEPS', 'SES', 'SEUPS',
-        'SFA', 'SGA', 'SGAN', 'SGAP', 'SGAS', 'SGCV', 'SGMN', 'SGO', 'SGON', 'SHA', 'SHB', 'SHCES', 'SHCGN', 'SHCGS', 'SHCN',
-        'SHCNW', 'SHCS', 'QOF', 'QRC', 'SHCSW', 'SHD', 'SHEP', 'SHIGS', 'SHIN', 'SHIP', 'SHIS', 'SHLN', 'SHLS', 'SHLSW', 'SHMA', 'SHN',
-        'SHS', 'SHPS', 'SHSN', 'SHTN', 'SHTo', 'SHTQ', 'SHTS', 'SIA', 'SIBS', 'SIG', 'SIT', 'SMA', 'SMAN', 'SMAS', 'SMC',
-        'SMDB', 'SMHN', 'SMHS', 'SMIN', 'SMLN', 'SMPW', 'SMU', 'SO', 'SOF', 'SOPI', 'SPLM', 'SPMN', 'SPO', 'SPP', 'SPVP',
-        'SQN', 'SQNW', 'SQS', 'SQSW', 'SRES', 'SRIA', 'SRPN', 'SRPS', 'SRTVN', 'SRTVS', 'STN', 'STRC', 'STS', 'UnB', 'VPLA',
-        'ZC', 'ZCA', 'ZE', 'ZfN', 'ZI', 'ZR', 'ZV', 'AE', 'AOS', 'CL', 'CLN', 'CLS', 'CLSW', 'CRS', 'EMI', 'EPDB', 'EPTG', 'EQN',
-        'EQS', 'ML', 'QI', 'QL', 'QRSW', 'SAN', 'SAS', 'SBN', 'SBS', 'SCEN', 'SCES', 'SCLRN', 'SCN', 'SCS', 'SDN', 'SDS', 'SEN',
-        'SEPN','SCLN', 'SEPS', 'SES', 'SGAN', 'SGAS', 'SGON', 'SHIP', 'SHIN', 'SHIS', 'SHLN', 'SHLS', 'SHN', 'SHS', 'SHTN', 'SAIN', 'SAIS',
-        'SIA', 'SIG', 'SMDB', 'SMHN', 'SMHS', 'SMLN', 'SMU', 'SQN', 'SQS', 'SQSW', 'SRTVN', 'SRTVS', 'QC', 'QE', 'SGCV', 'QN', 'EQRSW',
-        'CLNW', 'QNP', 'QNO', 'QNA', 'CRNW', 'QR', 'CSG', 'QNG', 'CNB', 'QSD', 'QNN', 'CSB', 'QNM', 'ADE', 'AE', 'AeB', 'AEMN',
-        'AOS', 'APO', 'ARIE', 'AVPR', 'BOT', 'BSB', 'CA', 'CADF', 'CCSW', 'CEN', 'CES', 'CE-UnB', 'CL','SHLN', 'SGCV',
-        'CLN', 'CLRN', 'CLS', 'CLSW', 'CRN', 'CRS', 'EMI', 'EMO', 'EPAA', 'EPAC', 'EPAR', 'EPCA', 'EPCL', 'EPCT', 'EPCV', 'EPDB',
-        'EPGU', 'EPIA', 'EPIB', 'EPIG', 'EPIP', 'EPJK', 'EPNA', 'EPNB', 'EPPN', 'EPPR', 'EPTG', 'EPTM', 'EPTT', 'EPUB', 'EPVB',
-        'EPVL', 'EPVP', 'EQN', 'EQS', 'ERL', 'ERN', 'ERS', 'ERW', 'ESAF', 'ETO', 'ML', 'PCH', 'PFB', 'PFR', 'PMU', 'PqEAT',
-        'PqEB', 'PqEN', 'PqNB', 'PTP', 'QELC', 'QI', 'QL', 'QMSW', 'QRSW', 'RER-IBGE', 'SAAN', 'SAFN', 'SAFS', 'SAI', 'SO', 'SAIN',
-        'SAIS', 'SAM', 'SAN e SAUN', 'SAS e SAUS', 'SBN', 'SBS', 'SCEEN', 'SCEES', 'SCEN', 'SCES', 'SCIA', 'SCLRN', 'SCN',
-        'SCRN', 'SCRS', 'SCS', 'SCTN', 'SCTS', 'SDC', 'SDMC', 'SDN', 'SDS', 'SEDB', 'SEN', 'SEPN', 'SEPS', 'SES', 'SEUPS',
-        'SFA', 'SGA', 'SGAN', 'SGAP', 'SGAS', 'SGCV', 'SGMN', 'SGO', 'SGON', 'SHA', 'SHB', 'SHCES', 'SHCGN', 'SHCGS', 'SHCN',
-        'SHCNW', 'SHCS', 'SHCSW', 'SHD', 'SHEP', 'SHIGS', 'SHIN', 'SHIP', 'SHIS', 'SHLN', 'SHLS', 'SHLSW', 'SHMA', 'SHN',
-        'SHS', 'SHPS', 'SHSN', 'SHTN', 'SHTo', 'SHTQ', 'SHTS', 'SIA', 'SIBS', 'SIG', 'SIT', 'SMA', 'SMAN', 'SMAS', 'SMC',
-        'SMDB', 'SMHN', 'SMHS', 'SMIN', 'SMLN', 'SMPW', 'SMU', 'SO', 'SOF', 'SOPI', 'SPLM', 'SPMN', 'SPO', 'SPP', 'SPVP',
-        'SQN', 'SQNW', 'SQS', 'SQSW', 'SRES', 'SRIA', 'SRPN', 'SRPS', 'SRTVN', 'SRTVS', 'STN', 'STRC', 'STS', 'UnB', 'VPLA',
-        'ZC', 'ZCA', 'ZE', 'ZfN', 'ZI', 'ZR', 'ZV', 'AE', 'AOS', 'CL', 'CLN', 'CLS', 'CLSW', 'CRS', 'EMI', 'EPDB', 'EPTG', 'EQN',
-        'EQS', 'ML', 'QI', 'QL', 'QRSW', 'SAN', 'SAS', 'SBN', 'SBS', 'SCEN', 'SCES', 'SCLRN', 'SCN', 'SCS', 'SDN', 'SDS', 'SEN',
-        'SEPN', 'SEPS', 'SES', 'SGAN', 'SGAS', 'SGON', 'SHIP', 'SHIN', 'SHIS', 'SHLN', 'SHLS', 'SHN', 'SHS', 'SHTN', 'SAIN', 'SAIS',
-        'SIA', 'SIG', 'SMDB', 'SMHN', 'SMHS', 'SMLN', 'SMU', 'SQN', 'SQS', 'SQSW', 'SRTVN', 'SRTVS', 'QC', 'QE', 'SGCV', 'QN', 'EQRSW',
-        'CLNW', 'QNP', 'QNO', 'QNA', 'CRNW', 'QR', 'CSG', 'QNG', 'CNB', 'QSD', 'QNN', 'CSB', 'QNM', 'CP', 'CCA', 'CSE', 'CRN', 'EPTC',
-        'EPG', 'EPL', 'EPTC', 'EQPB', 'EQPR', 'EQS', 'EXPA', 'FCE', 'FCS', 'GAMA', 'GLS', 'ICC', 'IEA', 'IEMA', 'IEB', 'IECA', 'IEP',
-        'IFB', 'IFC', 'IEAT', 'IPASE', 'LUM', 'MST', 'PLANO', 'PLANALTINA', 'PGS', 'PGC', 'PGS', 'PJA', 'PJG', 'PJF', 'PJC', 'PJB',
-        'PJG', 'PJE', 'PLA', 'PLANO', 'PLC', 'PRG', 'REGA', 'RII', 'RII', 'RII', 'RII', 'RII', 'RMB', 'RPPN', 'SAB', 'SCM', 'SCR', 'SML',
-        'SMO', 'STR', 'TNC', 'TRC', 'VNC', 'VNO', 'VNS', 'VND', 'VND', 'VNF', 'VNG', 'VNN', 'VP', 'VPP', 'VR', 'VRD', 'VSE', 'VSD', 'VSI', 
-        'ZI', 'ZN', 'ZP', 'ZRB', 'ZRD', 'ZRL', 'ZRM', 'ZRN', 'ZRO', 'ZRP', 'ZRQ', 'ZRS', 'ZRU', 'ZRV', 'ZRW', 'ZRX', 'ZRY', 'ZSB', 'ZSC',
-        'ZSE', 'ZSH', 'ZSJ', 'ZSK', 'ZSL', 'ZSM', 'ZSN', 'ZSO', 'ZSP', 'ZSQ', 'ZSR', 'ZSS', 'ZST', 'ZSU', 'ZSV', 'ZSW', 'ZSY', 'ZZ', 
-        'DVO', 'IC', 'LIXO', 'PSR', 'RPA', 'RTI', 'SFE', 'SOL', 'TIB', 'VPS', 'VSI', 'VPJ', 'VPQ', 'ZEF', 'ZFM', 'ZVJ', 'ZAS', 'ZAU', 'ZCV', 
-        'ZAC', 'ZAF', 'ZAX', 'ZCG', 'ZCR', 'ZET', 'ZGM', 'ZJP', 'ZLR', 'ZNT', 'ZPA', 'ZRA', 'ZSI', 'ZSZ', 'ZVV', 'ZVX', 'ZZL', 'ZAB', 'ZDF', 
-        'ZOE', 'ZRA', 'ZRI', 'ZSD', 'ZSU', 'ZVE', 'ZVX', 'ZYZ', 'ZAM', 'ZAW', 'ZEL', 'ZRS', 'ZSB', 'ZVJ', 'ZVV', 'ZDA', 'ZRE', 'ZSL', 'ZSE', 
-        'ZPP', 'ZRP', 'ZCI', 'ZI', 'ZRS', 'ZRW', 'ZSC', 'ZSY', 'ZVZ', 'ZSR', 'ZEM', 'ZUR', 'ZC', 'ZM', 'ZCX', 'ZMR', 'ZSL', 'ZLO', 'ZRE', 
-        'ZUN', 'ZD', 'ZM', 'ZPP', 'ZVC', 'ZAU', 'ZSU', 'ZSE', 'ZVP', 'ZDA', 'ZVP', 'ZDD', 'ZAI', 'ZUP', 'ZBS', 'ZCR', 'ZGE', 'ZSC', 'ZSP', 
-        'ZCL', 'ZVE', 'ZAM', 'ZVD', 'ZDL', 'ZCL', 'ZCP', 'ZUR', 'ZAA', 'ZCH', 'ZVI', 'ZVI', 'ZUZ', 'ZSS', 'ZVA', 'ZEM', 'ZEC', 'ZSB', 'ZMT',
-        'ZAS', 'ZMD', 'ZMG', 'ZMB', 'ZMZ', 'ZMC', 'ZMB', 'ZMM', 'ZCE', 'ZME', 'ZUR', 'ZPA', 'ZEP', 'ZNI', 'ZMP', 'ZRM', 'ZRL', 'ZDN', 'ZMT',
-        'ZDI', 'ZPP', 'ZCA', 'ZCP', 'ZRA', 'ZEM', 'ZPA', 'ZSL', 'ZSD', 'ZIS', 'ZTI', 'ZCT', 'ZPN', 'ZAN', 'ZEN', 'ZSN', 'ZST', 'ZNN', 'ZBN',
-        'ZSD', 'ZPI', 'ZAI', 'ZSI', 'ZGI', 'ZNI', 'ZAA', 'ZAM', 'ZDN', 'ZLM', 'ZVD', 'ZET', 'ZLP', 'ZSU', 'ZSI', 'ZFI', 'ZAV', 'ZVL', 'ZSL',
-        'ZRR', 'ZAC', 'ZTR', 'ZTN', 'ZUR', 'ZPC', 'ZRS', 'ZAE', 'ZRD', 'ZCP', 'ZEM', 'ZLM', 'ZVQ', 'ZSO', 'ZPA', 'ZFA', 'ZFA', 'ZAL', 'ZVL',
-        'ZSD', 'ZAE', 'ZDI', 'ZSI', 'ZDO', 'ZLI', 'ZPI', 'ZSE', 'ZGE', 'ZIT', 'ZMT', 'ZRE', 'ZSE', 'ZMD', 'ZTP', 'ZEN', 'ZEM', 'ZCI', 'ZLI',
-        'ZPR', 'ZVA', 'ZBR', 'ZTS', 'ZAT', 'ZLU', 'ZSO', 'ZES', 'ZFA', 'ZMI', 'ZPI', 'ZEC', 'ZMP', 'ZSI', 'ZEU', 'ZAP', 'ZMR', 'ZPM', 'ZFR',
-        'ZSO', 'ZRT', 'ZSO', 'ZLO', 'ZRE', 'ZFA', 'ZRM', 'ZRP', 'ZAV', 'ZEC', 'ZEM', 'ZVI', 'ZPA', 'ZDA', 'ZLT', 'ZER', 'ZMA', 'ZRA', 'ZCD',
-        'ZDP', 'ZEA', 'ZEA', 'ZCC', 'ZPD', 'ZLD', 'ZLS', 'ZLI', 'ZAC', 'ZMC', 'ZAV', 'ZRI', 'ZPA', 'ZLD', 'ZLO', 'ZDC', 'ZMV', 'ZSF', 'ZVE',
-        'ZDM', 'ZDP', 'ZPV', 'ZDL', 'ZSR', 'ZSI', 'ZDR', 'ZSC', 'ZC', 'ZLS', 'ZDN', 'ZET', 'ZPA', 'ZSS', 'ZEN', 'ZSL', 'ZDV', 'ZEN', 'ZPV',
-        'ZEM', 'ZDA', 'ZCD', 'ZEM', 'ZTR', 'ZPA', 'ZCN', 'ZCV', 'ZDP', 'ZEP', 'ZCP', 'ZPD', 'ZPC', 'ZCC', 'ZPC', 'ZPD', 'ZCG', 'ZRP', 'ZLV',
-        'ZEA', 'ZAC', 'ZEA', 'ZPA', 'ZPS', 'ZDI', 'ZDP', 'ZDP', 'ZLI', 'ZLC', 'ZEA', 'ZLI', 'ZLT', 'ZAD', 'ZEC', 'ZET', 'ZVI', 'ZSI', 'ZDP',
-        'ZLT', 'ZLT', 'ZRM', 'ZTI', 'ZPI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA',
-        'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM',
-        'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR',
-        'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS',
-        'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS',
-        'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS',
-        'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI',
-        'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI',
-        'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC',
-        'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA',
-        'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV',
-        'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS',
-        'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV',
-        'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI',
-        'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE',
-        'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC',
-        'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP',
-        'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA',
-        'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL',
-        'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA',
-        'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM',
-        'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL',
-        'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI',
-        'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM',
-        'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD',
-        'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD',
-        'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN',
-        'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP', 'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO',
-        'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE', 'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC',
-        'ZAV', 'ZDR', 'ZTS', 'ZAV', 'ZDA', 'ZEN', 'ZEM', 'ZCD', 'ZDS', 'ZRV', 'ZPA', 'ZLD', 'ZDS', 'ZCN', 'ZCM', 'ZAC', 'ZEC', 'ZDI', 'ZRP',
-        'ZEM', 'ZMS', 'ZVI', 'ZRI', 'ZRM', 'ZPO', 'ZTI', 'ZNI', 'ZTS', 'ZCS', 'ZPL', 'ZSD', 'ZVI', 'ZRP', 'ZDR', 'ZSA', 'ZEP', 'ZPM', 'ZPE',
-        'ZMC', 'ZEA', 'ZLI', 'ZGE', 'ZSL', 'ZAC', 'ZAV', 'ZDR'
-        ]
-
-    # Remover duplicatas
-    setores = list(set(setores))
-    
     # Extrair as palavras individuais do título
     palavras = titulo.split()
     palavras_upper = [palavra.upper() for palavra in palavras]
@@ -220,10 +123,44 @@ def extrair_setor(titulo):
 # Aplicar a função para extrair o setor e criar a nova coluna 'Setor'
 df_imovel['Setor'] = df_imovel['Título'].apply(extrair_setor)
 
-# Exibir DataFrame com a nova coluna
+# Função para extrair o tipo do imóvel do link
+def extrair_tipo(link):
+    if 'apartamento' in link:
+        return 'Apartamento'
+    elif 'casa' in link:
+        return 'Casa'
+    elif 'casa-condominio' in link:
+        return 'Casa Condomínio'
+    elif 'galpo' in link:
+        return 'Galpão'
+    elif 'garagem' in link:
+        return 'Garagem'
+    elif 'hotel-flat' in link:
+        return 'Flat'
+    elif 'flat' in link:
+        return 'Flat'
+    elif 'kitnet' in link:
+        return 'Kitnet'
+    elif 'loja' in link:
+        return 'Loja'
+    elif 'loteamento' in link:
+        return 'Loteamento'
+    elif 'lote-terreno' in link:
+        return 'Lote Terreno'
+    elif 'ponto-comercial' in link:
+        return 'Ponto Comercial'
+    elif 'prdio' in link or 'predio' in link:
+        return 'Prédio'
+    elif 'sala' in link:
+        return 'Sala'
+    else:
+        return 'OUTROS'
+
+# Adicionar uma coluna 'Tipo do Imóvel' ao DataFrame e preenchê-la com os tipos extraídos dos links
+df_imovel['Tipo do Imóvel'] = df_imovel['Link'].apply(extrair_tipo)
 
 # Write DataFrame to Excel file
-df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\imovel_web\imovel_web_aluguel_df.xlsx', index=False)
+df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\imovel_web_data_base\imovel_web_aluguel_df_04_2024.xlsx', index=False)
 fim = time.time()
 
 tempo_total_segundos = fim - inicio

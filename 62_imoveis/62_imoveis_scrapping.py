@@ -1,3 +1,4 @@
+from distrito_federal_setor import setores
 from curses.ascii import alt
 import requests
 from bs4 import BeautifulSoup
@@ -5,15 +6,13 @@ import pandas as pd
 import re
 import numpy as np
 
-from distrito_federal_setor import setores
-
 lista_de_imoveis = []
 passou_aqui = 0
 
-for pagina in range(1, 1221):
+for pagina in range(1, 117):
     passou_aqui += 1
     print(f'Url:{passou_aqui}')
-    resposta = requests.get(f'https://www.62imoveis.com.br/venda/go/todos/imoveis?pagina={pagina}')
+    resposta = requests.get(f'https://www.62imoveis.com.br/aluguel/go/todos/imoveis?pagina={pagina}')
 
     conteudo = resposta.content.decode('utf-8', 'replace')
 
@@ -102,9 +101,44 @@ def extrair_setor(titulo):
 # Aplicar a função para extrair o setor e criar a nova coluna 'Setor'
 df_imovel['Setor'] = df_imovel['Título'].apply(extrair_setor)
 
-# Exibir DataFrame com a nova coluna
-print(df_imovel)
+# Função para extrair o tipo do imóvel do link
+def extrair_tipo(link):
+    if 'apartamento' in link:
+        return 'Apartamento'
+    elif 'casa' in link:
+        return 'Casa'
+    elif 'casa-condominio' in link:
+        return 'Casa Condomínio'
+    elif 'galpo' in link:
+        return 'Galpão'
+    elif 'garagem' in link:
+        return 'Garagem'
+    elif 'hotel-flat' in link:
+        return 'Flat'
+    elif 'flat' in link:
+        return 'Flat'
+    elif 'kitnet' in link:
+        return 'Kitnet'
+    elif 'loja' in link:
+        return 'Loja'
+    elif 'loteamento' in link:
+        return 'Loteamento'
+    elif 'lote-terreno' in link:
+        return 'Lote Terreno'
+    elif 'ponto-comercial' in link:
+        return 'Ponto Comercial'
+    elif 'prdio' in link or 'predio' in link:
+        return 'Prédio'
+    elif 'sala' in link:
+        return 'Sala'
+    else:
+        return 'OUTROS'
+
+# Adicionar uma coluna 'Tipo do Imóvel' ao DataFrame e preenchê-la com os tipos extraídos dos links
+df_imovel['Tipo do Imóvel'] = df_imovel['Link'].apply(extrair_tipo)
 
 # Write DataFrame to Excel file
-df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\62_imoveis\62_imoveis_GO_venda_04_2024.xlsx', index=False)
+df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\62_imoveis_data_base\62_imoveis_GO_aluguel_04_2024.xlsx', index=False)
 
+# Exibir DataFrame com a nova coluna
+print(df_imovel)
