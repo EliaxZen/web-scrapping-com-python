@@ -12,6 +12,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
+from distrito_federal_setor import setores
+
+
+def extrair_setor(titulo):
+    palavras = titulo.split()
+    palavras_upper = [palavra.upper() for palavra in palavras]
+    for palavra in palavras_upper:
+        if palavra in setores:
+            return palavra
+    return "OUTRO"
+
 
 def print_imoveis_carregados(driver):
     try:
@@ -89,6 +100,7 @@ def scrape_imoveis():
                     "h2", attrs={"class": "card_split_vertically__location"}
                 )
                 titulo_text = titulo.text.strip() if titulo else None
+                setor = extrair_setor(titulo_text)
 
                 link = "https://www.thaisimobiliaria.com.br" + imovel["href"]
 
@@ -164,6 +176,7 @@ def scrape_imoveis():
                             suite,
                             banheiro,
                             vaga,
+                            setor,
                         ]
                     )
 
@@ -179,7 +192,7 @@ def scrape_imoveis():
 
 def salvar_excel(dataframe):
     dataframe.to_excel(
-        "C:\\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\thais_imobiliaria\imoveis_scrapping_thais_imobiliaria_venda.xlsx",
+        r"C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\thais_imobiliaria\thais_imobiliaria_venda_com_setores.xlsx",
         index=False,
     )
 
@@ -199,6 +212,7 @@ def main():
             "Suite",
             "Banheiro",
             "Vaga",
+            "Setor",
         ],
     )
 
