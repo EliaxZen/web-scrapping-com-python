@@ -31,10 +31,10 @@ urls_adicionados = set()
 # Tempo de espera entre solicitações (em segundos)
 TEMPO_ESPERA = 0  # 1 segundo
 
-for pagina in range(1, 3000):
+for pagina in range(1, 395):
     passou_aqui += 1
     print(f"Passou aqui:{passou_aqui}")
-    url = f"https://www.imovelweb.com.br/imoveis-venda-distrito-federal-pagina-{pagina}.html"
+    url = f"https://www.imovelweb.com.br/imoveis-aluguel-distrito-federal-pagina-{pagina}.html"
     try:
         resposta = s.get(url)
         resposta.raise_for_status()  # Levanta um erro se a requisição falhar
