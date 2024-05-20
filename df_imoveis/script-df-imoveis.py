@@ -9,10 +9,10 @@ import numpy as np
 lista_de_imoveis = []
 passou_aqui = 0
 
-for pagina in range(1, 300):
+for pagina in range(1, 10):
     passou_aqui += 1
     print(f'Url:{passou_aqui}')
-    resposta = requests.get(f'https://www.dfimoveis.com.br/aluguel/df/todos/imoveis?pagina={pagina}')
+    resposta = requests.get(f'https://www.dfimoveis.com.br/lancamento/df/todos/imoveis?pagina={pagina}')
 
     conteudo = resposta.content.decode('utf-8', 'replace')
 
@@ -64,6 +64,9 @@ for pagina in range(1, 300):
 
 # Create DataFrame
 df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo', 'Link', 'Preço','Área', 'Quarto', 'Suite', 'Vaga', 'Imobiliária'])
+
+# Remover duplicatas com base na coluna 'Link'
+df_imovel = df_imovel.drop_duplicates(subset='Link')
 
 # Convertendo a coluna 'Preço' para números
 df_imovel['Preço'] = df_imovel['Preço'].str.replace(r'\D', '', regex=True).astype(float)
@@ -146,5 +149,4 @@ df_imovel['Tipo'] = df_imovel['Link'].apply(extrair_tipo)
 print(df_imovel)
 
 # Write DataFrame to Excel file
-df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\df_imoveis_data_base\df_imoveis_df_venda_05_2024.xlsx', index=False)
-
+df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\df_imoveis_data_base\df_imoveis_df_lancamento_05_2024.xlsx', index=False)
