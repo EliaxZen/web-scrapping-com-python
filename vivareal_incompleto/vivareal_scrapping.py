@@ -23,7 +23,7 @@ with requests.Session() as s:
     s.headers.update(headers)
 
 # Loop para acessar apenas a página 1
-for pagina in range(1, 10):
+for pagina in range(1, 100):
     passou_aqui += 1
     print(f'Passou aqui:{passou_aqui}')
     url = f'https://www.vivareal.com.br/venda/distrito-federal/brasilia/?pagina={pagina}'
