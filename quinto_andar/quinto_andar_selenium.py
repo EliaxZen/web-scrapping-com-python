@@ -1,252 +1,214 @@
-import threading
-from time import sleep
-
-
+import time
 from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
-import pandas as pd
 from bs4 import BeautifulSoup
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+import pandas as pd
+import re
+import numpy as np
 from distrito_federal_setor import setores
 
+# Configurar o Selenium com Chrome e WebDriver Manager
+chrome_options = Options()
+chrome_options.add_argument("--headless")  # Executar em modo headless (sem abrir o navegador)
+driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
 
-# Configurações do Chrome
-options = Options()
+lista_de_imoveis = []
 
-# Definir um user-agent para evitar a detecção de headless
-options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36")
+for pagina in range(1, 242):
+    driver.get(f'https://www.dfimoveis.com.br/aluguel/df/todos/imoveis?pagina={pagina}')
+    #time.sleep(5)  # Aumentar o tempo de espera para garantir que a página carregue
 
-# Desativar o uso do WebGL se não for necessário para o site
-options.add_argument("--disable-webgl")
+    # Capturar os links dos imóveis
+    imoveis = driver.find_elements(By.CSS_SELECTOR, 'a.new-card')
+    links_imoveis = [imovel.get_attribute('href') for imovel in imoveis]
 
+    for link in links_imoveis:
+        driver.get(link)
+        #time.sleep(5)  # Aumentar o tempo de espera para garantir que a página carregue
+        
+        conteudo = driver.page_source
+        site = BeautifulSoup(conteudo, 'html.parser')
 
-def extrair_setor(titulo):
+        # Extração de informações adicionais dentro do anúncio
+        try:
+            titulo = site.find('h1', attrs={'class': 'mb-0 font-weight-600 fs-1-5'}).text.strip()
+        except AttributeError:
+            titulo = 'N/A'
+        
+        try:
+            preco = site.find('small', attrs={'class': 'display-5 text-warning precoAntigoSalao'}).text.strip()
+        except AttributeError:
+            preco = 'N/A'
+        
+        # Filtrar preços inválidos
+        if preco in ['N/A', 'Sob Consulta'] or not re.search(r'\d', preco):
+            continue  # Pular este imóvel se o preço for inválido
+        
+        # Remover texto não numérico do preço
+        preco = re.sub(r'[^\d,]', '', preco).replace(',', '.')
+
+        try:
+            imobiliaria = site.find('h6', attrs={'class': 'pb-0 mb-0'}).text.strip()
+        except AttributeError:
+            imobiliaria = 'N/A'
+        
+        try:
+            subtitulo = site.find('p', attrs={'class': 'w-100 pb-3 mb-0 texto-descricao'}).text.strip()
+        except AttributeError:
+            subtitulo = 'N/A'
+        
+        try:
+            area = site.find('small', attrs={'class': 'display-5 text-warning'}).text.strip()
+        except AttributeError:
+            area = 'N/A'
+        
+        try:
+            detalhes_div = site.find('div', attrs={'class': 'row justify-content-between flex-row flex-nowrap mt-1 mb-2'})
+            detalhes_itens = detalhes_div.find_all('small', attrs={'class': 'text-muted'})
+            quarto = detalhes_itens[0].text.strip() if detalhes_itens else 'N/A'
+            suite = detalhes_itens[1].text.strip() if len(detalhes_itens) > 1 else 'N/A'
+            vaga = detalhes_itens[2].text.strip() if len(detalhes_itens) > 2 else 'N/A'
+            cidade = detalhes_itens[3].text.strip() if len(detalhes_itens) > 3 else 'N/A'
+        except AttributeError:
+            quarto = suite = vaga = cidade = 'N/A'
+
+        try:
+            detalhe1 = site.find('h6', attrs={'class': 'text-normal mb-0'}).text.strip()
+        except AttributeError:
+            detalhe1 = 'N/A'
+
+        try:
+            memorial = site.find('small', text=re.compile('Memorial de Incorporação')).text.strip()
+        except AttributeError:
+            memorial = 'N/A'
+        
+        try:
+            codigo = site.find('small', text=re.compile(r'\d{9}')).text.strip()
+        except AttributeError:
+            codigo = 'N/A'
+
+        try:
+            ultima_atualizacao = site.find('small', text=re.compile(r'\d{2}/\d{2}/\d{4}')).text.strip()
+        except AttributeError:
+            ultima_atualizacao = 'N/A'
+
+        try:
+            fase = site.find('h5', text=re.compile('Fase')).find('span').text.strip()
+        except AttributeError:
+            fase = 'N/A'
+
+        try:
+            caracteristicas_ul = site.find('ul', attrs={'class': 'checkboxes'})
+            caracteristicas = [li.text.strip() for li in caracteristicas_ul.find_all('li')] if caracteristicas_ul else []
+        except AttributeError:
+            caracteristicas = []
+
+        lista_de_imoveis.append([
+            titulo, subtitulo, link, preco, area, quarto, suite, vaga, cidade,
+            imobiliaria, detalhe1, memorial, codigo, ultima_atualizacao, fase, caracteristicas
+        ])
+
+# Fechar o driver
+driver.quit()
+
+# Criar o DataFrame
+df_imovel = pd.DataFrame(lista_de_imoveis, columns=[
+    'Título', 'Subtítulo', 'Link', 'Preço', 'Área', 'Quarto', 'Suite', 'Vaga', 'Cidade',
+    'Imobiliária', 'Detalhe 1', 'Memorial de Incorporação', 'Código', 'Última Atualização', 'Fase', 'Características'
+])
+
+# Remover duplicatas com base na coluna 'Link'
+df_imovel = df_imovel.drop_duplicates(subset='Link')
+
+# Remover espaços em branco e substituir valores vazios por NaN
+df_imovel['Preço'] = df_imovel['Preço'].str.replace(' ', '').replace('', np.nan)
+df_imovel['Área'] = df_imovel['Área'].str.replace(' ', '').replace('', np.nan)
+
+# Remover os pontos (separadores de milhares) da coluna 'Preço'
+df_imovel['Preço'] = df_imovel['Preço'].str.replace('.', '')
+
+# Remover linhas com valores nulos na coluna 'Preço'
+df_imovel = df_imovel.dropna(subset=['Preço'])
+
+# Convertendo a coluna 'Preço' para números
+df_imovel['Preço'] = df_imovel['Preço'].str.replace(r'\D', '', regex=True).astype(float)
+
+# Converter a coluna 'Área' para números
+df_imovel['Área'] = df_imovel['Área'].str.replace(r'\D', '', regex=True).astype(float)
+
+# Convertendo as colunas 'Quartos', 'Suítes' e 'Vagas' para números
+df_imovel['Quarto'] = df_imovel['Quarto'].str.extract(r'(\d+)', expand=False).fillna('0').astype(int)
+df_imovel['Suite'] = df_imovel['Suite'].str.extract(r'(\d+)', expand=False).fillna('0').astype(int)
+df_imovel['Vaga'] = df_imovel['Vaga'].str.extract(r'(\d+)', expand=False).fillna('0').astype(int)
+
+# Filtrar imóveis onde 'Preço' ou 'Área' são 0
+df_imovel = df_imovel[(df_imovel['Preço'] != 0) & (df_imovel['Área'] != 0)]
+
+# Adicionar nova coluna 'M2' e calcular a divisão
+df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Área']
+
+# Substituir os valores vazios por 0 nas colunas especificadas
+colunas_para_preencher = ['Preço', 'Área', 'Quarto', 'Suite', 'Vaga', 'M2']
+df_imovel[colunas_para_preencher] = df_imovel[colunas_para_preencher].fillna(0)
+
+# Função para extrair o setor da string de título
+def extrair_setor(titulo): 
+    # Extrair as palavras individuais do título
     palavras = titulo.split()
     palavras_upper = [palavra.upper() for palavra in palavras]
+    # Encontrar a primeira sigla que corresponde a um setor
     for palavra in palavras_upper:
         if palavra in setores:
             return palavra
-    return "OUTRO"
-
-
-def print_imoveis_carregados(driver):
-    try:
-        while True:
-            sleep(5)
-            imoveis_carregados = len(
-                driver.find_elements(
-                    By.XPATH, "/html/body/div[1]/div/div/main/section[2]/div/div[2]/div[2]/div/a"
-                )
-            )
-            print(f"Imóveis carregados: {imoveis_carregados}")
-    except KeyboardInterrupt:
-        pass
-
-
-def scrape_imoveis():
-    opts = Options()
-    #opts.add_argument("--headless")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--no-sandbox")
-
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-setuid-sandbox")
-    chrome_options.add_argument("--memory-growth=10gb")
-    opts.add_argument("--disable-webgl")
-
-
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()), options=chrome_options
-    )
-
-    lista_de_imoveis = []
     
-    try:
-        driver.get("https://www.quintoandar.com.br/alugar/imovel/bela-vista-sao-paulo-sp-brasil?referrer=home&profiling=true")
+    # Se nenhuma sigla for encontrada, retornar 'OUTRO'
+    return 'OUTRO'
 
-        driver.execute_script("document.getElementById('cookies-component').remove();")
+# Aplicar a função para extrair o setor e criar a nova coluna 'Setor'
+df_imovel['Setor'] = df_imovel['Título'].apply(extrair_setor)
 
-        WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located(
-                (By.XPATH, "/html/body/div[1]/div/div/main/section[2]/div/div[2]/div[2]/div")
-            )
-        )
+# Função para extrair o tipo do imóvel do link
+def extrair_tipo(link):
+    if "apartamento" in link:
+        return "Apartamento"
+    elif "casa" in link:
+        return "Casa"
+    elif "casa-condominio" in link:
+        return "Casa Condomínio"
+    elif "galpo" in link:
+        return "Galpão"
+    elif "garagem" in link:
+        return "Garagem"
+    elif "hotel-flat" in link:
+        return "Flat"
+    elif "flat" in link:
+        return "Flat"
+    elif "kitnet" in link:
+        return "Kitnet"
+    elif "loja" in link:
+        return "Loja"
+    elif "loteamento" in link:
+        return "Loteamento"
+    elif "lote-terreno" in link:
+        return "Lote Terreno"
+    elif "ponto-comercial" in link:
+        return "Ponto Comercial"
+    elif "prdio" in link or "predio" in link:
+        return "Prédio"
+    elif "sala" in link:
+        return "Sala"
+    elif "rural" in link:
+        return "Zona Rural"
+    elif "lancamento" in link:
+        return "Lançamento"
+    else:
+        return "OUTROS"
 
-        print_thread = threading.Thread(target=print_imoveis_carregados, args=(driver,))
-        print_thread.start()
+# Adicionar nova coluna 'Tipo' ao DataFrame
+df_imovel['Tipo'] = df_imovel['Link'].apply(extrair_tipo)
 
-        while True:
-            try:
-                botao_ver_mais = WebDriverWait(driver, 10).until(
-                    EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, 'button[aria-label="Ver mais"].Cozy__Button-Component.bvu7K9.Pwr-5A.BDubiF')
-                    )
-                )
-                botao_ver_mais.click()
-                sleep(0.5)
-            except (NoSuchElementException, TimeoutException):
-                print(
-                    "Botão 'Ver Mais' não encontrado. Todos os imóveis foram carregados."
-                )
-                break
-
-            # Coletar os dados dos imóveis a cada clique no botão "Ver Mais"
-            page_content = driver.page_source
-            site = BeautifulSoup(page_content, "html.parser")
-
-            imoveis = driver.find_elements(By.XPATH, "/html/body/div[1]/div/div/main/section[2]/div/div[2]/div[2]/div/a")
-
-            for imovel in imoveis:
-                titulo_text = imovel.get_attribute("title")
-                setor = extrair_setor(titulo_text)
-
-                link = imovel.get_attribute("href")
-
-                imovel_html = imovel.get_attribute('outerHTML')
-                imovel_soup = BeautifulSoup(imovel_html, 'html.parser')
-
-                tipo = imovel_soup.find("p", attrs={"class": "card_split_vertically__type"})
-                tipo_text = tipo.text.strip() if tipo else None
-
-                preco_area = imovel_soup.find(
-                    "div", attrs={"class": "card_split_vertically__value-container"}
-                )
-                preco = (
-                    preco_area.find(
-                        "p", attrs={"class": "card_split_vertically__value"}
-                    ).text.strip()
-                    if preco_area
-                    else "Preço não especificado"
-                )
-                preco = "".join(
-                    filter(str.isdigit, preco)
-                )  # Remover caracteres não numéricos
-
-                if (
-                    not preco or preco == "0"
-                ):  # Verificar se o preço está ausente ou igual a zero
-                    continue  # Ignorar este imóvel e passar para o próximo
-
-                metro = imovel_soup.find(
-                    "li", attrs={"class": "card_split_vertically__spec"}
-                )
-                metro_text = metro.text.replace("m²", "").strip() if metro else None
-                metro_text = "".join(
-                    filter(str.isdigit, metro_text)
-                )  # Remover caracteres não numéricos
-
-                # quartos, suíte, banheiros, vagas
-                quarto_suite_banheiro_vaga = imovel_soup.find(
-                    "ul", attrs={"class": "card_split_vertically__specs"}
-                )
-                if quarto_suite_banheiro_vaga:
-                    lista = quarto_suite_banheiro_vaga.findAll("li")
-                    quarto = suite = banheiro = vaga = (
-                        0  # Valor padrão 0 para substituir espaços em branco
-                    )
-
-                    for item in lista:
-                        text_lower = item.text.lower()
-                        if "quarto" in text_lower or "quartos" in text_lower:
-                            quarto = int(
-                                item.text.split()[0]
-                            )  # Apenas o primeiro número
-                        elif "suíte" in text_lower or "suítes" in text_lower:
-                            suite = int(
-                                item.text.split()[0]
-                            )  # Apenas o primeiro número
-                        elif "banheiro" in text_lower or "banheiros" in text_lower:
-                            banheiro = int(
-                                item.text.split()[0]
-                            )  # Apenas o primeiro número
-                        elif "vaga" in text_lower or "vagas" in text_lower:
-                            vaga = int(item.text.split()[0])  # Apenas o primeiro número
-                else:
-                    quarto = suite = banheiro = vaga = 0
-
-                # Adicionar informações à lista de imóveis apenas se não estiverem duplicadas
-                if link not in [imovel[2] for imovel in lista_de_imoveis]:
-                    lista_de_imoveis.append(
-                        [
-                            titulo_text,
-                            tipo_text,
-                            link,
-                            preco,
-                            metro_text,
-                            quarto,
-                            suite,
-                            banheiro,
-                            vaga,
-                            setor,
-                        ]
-                    )
-
-        return lista_de_imoveis
-
-    except Exception as e:
-        print(f"Ocorreu um erro durante o scraping: {e}")
-        return lista_de_imoveis  # Retornar os dados coletados até o momento em caso de erro
-
-    finally:
-        driver.quit()
-
-
-def salvar_excel(dataframe):
-    dataframe.to_excel(
-        r"C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\quinto_andar\quinto_andar.xlsx",
-        index=False,
-    )
-
-
-def main():
-    lista_de_imoveis = scrape_imoveis()
-
-    df_imovel = pd.DataFrame(
-        lista_de_imoveis,
-        columns=[
-            "Título",
-            "Tipo",
-            "Link",
-            "Preço",
-            "Metro Quadrado",
-            "Quarto",
-            "Suite",
-            "Banheiro",
-            "Vaga",
-            "Setor",
-        ],
-    )
-
-    df_imovel["Preço"] = pd.to_numeric(df_imovel["Preço"], errors="coerce")
-    df_imovel["Metro Quadrado"] = pd.to_numeric(
-        df_imovel["Metro Quadrado"], errors="coerce"
-    )
-    df_imovel["Quarto"] = pd.to_numeric(df_imovel["Quarto"], errors="coerce")
-    df_imovel["Suite"] = pd.to_numeric(df_imovel["Suite"], errors="coerce")
-    df_imovel["Banheiro"] = pd.to_numeric(df_imovel["Banheiro"], errors="coerce")
-    df_imovel["Vaga"] = pd.to_numeric(df_imovel["Vaga"], errors="coerce")
-
-    if df_imovel.isnull().values.any():
-        print("Existem valores nulos no DataFrame. Lidar com eles conforme necessário.")
-
-    df_imovel["M2"] = df_imovel["Preço"] / df_imovel["Metro Quadrado"]
-    df_imovel[["Quarto", "Suite", "Banheiro", "Vaga", "M2"]] = df_imovel[
-        ["Quarto", "Suite", "Banheiro", "Vaga", "M2"]
-    ].fillna(0)
-
-    salvar_excel(df_imovel)
-
-    print(df_imovel)
-
-
-if __name__ == "__main__":
-    main()
+# Exportar o DataFrame para um arquivo Excel
+df_imovel.to_excel(r'quinto_andar_05_2024.xlsx', index=False)
