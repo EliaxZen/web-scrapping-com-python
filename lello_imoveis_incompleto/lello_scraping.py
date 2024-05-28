@@ -6,7 +6,7 @@ import numpy as np
 lista_de_imoveis = []
 links_processados = set()
 
-for pagina in range(1, 700):
+for pagina in range(1, 10):
     print(f'Processando página: {pagina}')
     url = f'https://www.lelloimoveis.com.br/venda/residencial/sao_paulo-cidades/{pagina}-pagina/'
     resposta = requests.get(url)
