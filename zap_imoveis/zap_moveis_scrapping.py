@@ -1,66 +1,138 @@
-import requests
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import pandas as pd
+import time
+import random
+
+# Lista de agentes de usuário
+user_agents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
+]
+
+# Lista de proxies
+proxy_list = [
+    'http://proxy1:port',
+    'http://proxy2:port',
+    # Adicione mais proxies conforme necessário
+]
+
+# Configurar o driver do Selenium
+service = ChromeService(executable_path=ChromeDriverManager().install())
+options = webdriver.ChromeOptions()
+options.add_argument('--headless')  # Executar em modo headless
+options.add_argument('--no-sandbox')
+options.add_argument('--disable-dev-shm-usage')
+options.add_argument('--disable-blink-features=AutomationControlled')  # Desabilitar controle de automação do Blink
+options.add_argument(f'user-agent={random.choice(user_agents)}')
+options.add_argument(f'--proxy-server={random.choice(proxy_list)}')  # Adicionar proxy
+
+# Evitar detecção como bot
+options.add_experimental_option("excludeSwitches", ["enable-automation"])
+options.add_experimental_option('useAutomationExtension', False)
+
+driver = webdriver.Chrome(service=service, options=options)
+driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
 lista_de_imoveis = []
-pagina = 1
+links_processados = set()
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-}
-
-for pagina in range(1400):
-    pagina += 1
-    url = f'https://www.zapimoveis.com.br/venda/imoveis/df+brasilia/?__ab=exp-aa-test:B,rec-cta:control&transacao=venda&onde=,Distrito%20Federal,Bras%C3%ADlia,,,,,city,BR%3EDistrito%20Federal%3ENULL%3EBrasilia,-15.826691,-47.92182,&pagina={pagina}'
-    resposta = requests.get(url, headers=headers)
-    conteudo = resposta.content
-
+for pagina in range(1, 10):
+    print(f'Processando página: {pagina}')
+    url = f'https://www.zapimoveis.com.br/venda/imoveis/df+brasilia/?__ab=exp-aa-test:control,novopos:control,super-high:new,olx:control,score-rkg:sc-rkg&transacao=venda&onde=,Distrito%20Federal,Bras%C3%ADlia,,,,,city,BR%3EDistrito%20Federal%3ENULL%3EBrasilia,-15.826691,-47.92182,&pagina={pagina}'
+    
+    driver.get(url)
+    time.sleep(random.uniform(5, 15))  # Aguardar um tempo aleatório entre 5 e 15 segundos
+    
+    conteudo = driver.page_source
     site = BeautifulSoup(conteudo, 'html.parser')
-
-    # HTML do anúncio do imóvel
-    imoveis = site.findAll('a', attrs={'class': 'result-card result-card__highlight result-card__highlight--standard'})
-
+    
+    # Verificar se a página carregou corretamente
+    if not site:
+        print(f"Falha ao carregar a página {pagina}")
+        continue
+    
+    # Imprimir o conteúdo HTML da página para análise
+    print(f"Conteúdo HTML da página {pagina}:")
+    print(site.prettify()[:2000])  # Imprimir apenas os primeiros 2000 caracteres para evitar excesso de saída
+    
+    imoveis = site.findAll('a', class_='result-card')
+    
+    # Verificar se a lista de imóveis foi encontrada
+    print(f"Número de imóveis encontrados na página {pagina}: {len(imoveis)}")
+    
     for imovel in imoveis:
-        # Título do imóvel
-        titulo = imovel.find('div', attrs={'data-cy': 'card__address'})
-        titulo_text = titulo.text if titulo else None
+        try:
+            # Link do imóvel
+            link = imovel.get('href')
 
-        # Subtítulo do imóvel
-        subtitulo = imovel.find('p', attrs={'class': 'l-text l-u-color-neutral-28 l-text--variant-body-small l-text--weight-regular card__street'})
-        subtitulo_text = subtitulo.text.strip() if subtitulo else None
+            # Verificar se o link já foi processado
+            if link in links_processados:
+                continue
 
-        # Link do imovel
-        link = imovel['href']
+            # Verificar se cada elemento existe antes de acessá-lo
+            titulo_elem = imovel.find('p', class_='card__street')
+            subtitulo_elem = imovel.find('div', {'data-cy': 'card__address'})
+            preco_elem = imovel.find('div', class_='listing-price')
+            area_elem = imovel.find('p', itemprop='floorSize')
+            quartos_elem = imovel.find('p', itemprop='numberOfRooms')
+            banheiros_elem = imovel.find('p', itemprop='numberOfBathroomsTotal')
+            vagas_elem = imovel.find('p', itemprop='numberOfParkingSpaces')
 
-        # Preco aluguel
-        preco_area = imovel.find('div', attrs={'class': 'listing-price'})
-        preco = preco_area.find('p')
-        preco_text = preco.text if preco else None
+            # Continuar apenas se todos os elementos necessários forem encontrados
+            if all([titulo_elem, subtitulo_elem, preco_elem, area_elem, quartos_elem, banheiros_elem, vagas_elem]):
+                titulo = titulo_elem.text.strip()
+                subtitulo = subtitulo_elem.find('h2', class_='card__address').text.strip()
+                preco = preco_elem.find('p').text.strip()
+                area = area_elem.text.strip()
+                quartos = quartos_elem.text.strip()
+                banheiros = banheiros_elem.text.strip()
+                vagas = vagas_elem.text.strip()
 
-        # Metro quadrado
-        metro_area = imovel.find('section', attrs={'class': 'card__amenities'})
-        metro = metro_area.find('p', itemprop='floorSize') if metro_area else None
-        metro_text = metro.text.replace('m²', '').strip() if metro else 0
+                lista_de_imoveis.append([
+                    titulo, subtitulo, link, preco, area, quartos, banheiros, vagas
+                ])
 
-        # Quartos
-        quarto = imovel.find('p', itemprop='numberOfRooms') if metro_area else None
-        quarto_text = quarto.text if quarto else 0
+                # Adicionar o link ao conjunto de links processados
+                links_processados.add(link)
+            else:
+                # Imprimir quais elementos não foram encontrados
+                print(f"Imóvel com link {link} não possui todos os elementos necessários.")
+        except Exception as e:
+            print(f"Erro ao processar imóvel: {e}")
 
-        # Banheiros
-        banheiro = metro_area.find('p', itemprop='numberOfBathroomsTotal') if metro_area else None
-        banheiro_text = banheiro.text if banheiro else 0
+# Criar DataFrame
+df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo', 'Link', 'Preço', 'Área', 'Quartos', 'Banheiros', 'Vagas'])
 
-        # Vagas/Garagem
-        garagem = metro_area.find('p', itemprop='numberOfParkingSpaces') if metro_area else None
-        garagem_text = garagem.text if garagem else 0
+# Remover duplicatas com base na coluna 'Link'
+df_imovel = df_imovel.drop_duplicates(subset='Link')
 
-        
-            
+# Função para limpar e converter colunas numéricas
+def limpar_conversao_numerica(coluna):
+    return pd.to_numeric(coluna.str.replace(r'\D', '', regex=True), errors='coerce')
 
-        # Check if 'Quarto', 'Banheiro', or 'Vaga' contains a hyphen
-        if '-' not in str(metro_text) and '-' not in str(quarto_text) and '-' not in str(banheiro_text) and '-' not in str(garagem_text) and 'Valor sob Consulta' not in str(preco_text):
-            lista_de_imoveis.append([titulo_text, subtitulo_text, link, preco_text, metro_text, quarto_text, banheiro_text, garagem_text])
+# Aplicar função de limpeza nas colunas numéricas
+df_imovel['Preço'] = limpar_conversao_numerica(df_imovel['Preço'])
+df_imovel['Área'] = limpar_conversao_numerica(df_imovel['Área'])
+df_imovel['Quartos'] = limpar_conversao_numerica(df_imovel['Quartos'])
+df_imovel['Banheiros'] = limpar_conversao_numerica(df_imovel['Banheiros'])
+df_imovel['Vagas'] = limpar_conversao_numerica(df_imovel['Vagas'])
 
-df_imovel = pd.DataFrame(lista_de_imoveis, columns=['Título', 'Subtítulo/Setor', 'Link', 'Preço','Metro Quadrado', 'Quarto', 'Banheiro', 'Vaga'])
-df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\zap_imoveis\zap_imoveis_teste.xlsx', index=False)
+# Remover imóveis sem preço ou área
+df_imovel = df_imovel.dropna(subset=['Preço', 'Área'])
+
+# Adicionar coluna M2
+df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Área']
+
+# Exibir DataFrame final
 print(df_imovel)
+
+# Salvar DataFrame em um arquivo Excel
+df_imovel.to_excel('zapimoveis.xlsx', index=False)
+
+# Encerrar o driver do Selenium
+driver.quit()
