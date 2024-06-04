@@ -107,7 +107,7 @@ TEMPO_ESPERA = 0  # 1 segundo
 # Configurar o driver
 driver = scrape_imoveis()
 
-for pagina in range(1, 395):
+for pagina in range(1, 10):
     print(f"Navegando na página {pagina}")
     url = f"https://www.imovelweb.com.br/imoveis-aluguel-distrito-federal-pagina-{pagina}.html"
     try:
