@@ -7,6 +7,9 @@ import time
 import logging
 import concurrent.futures
 from tqdm import tqdm
+from pathlib import Path
+import tempfile
+import os
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,24 +20,24 @@ HEADERS = {
     'Referer': 'https://www.imovelweb.com.br/',
 }
 
-def configure_session():
+def configurar_sessao():
     """Configura a sessão de requests com headers customizados."""
     session = requests.Session()
     session.headers.update(HEADERS)
     return session
 
-def extract_page_data(session, page):
+def extrair_dados_pagina(sessao, pagina):
     """Extrai o conteúdo HTML de uma página específica."""
-    url = f'https://www.creditoreal.com.br/vendas?page={page}'
+    url = f'https://www.creditoreal.com.br/vendas?page={pagina}'
     try:
-        response = session.get(url)
+        response = sessao.get(url)
         response.raise_for_status()
         return response.content
     except requests.exceptions.RequestException as e:
-        logging.error(f'Erro ao acessar a página {page}: {e}')
+        logging.error(f'Erro ao acessar a página {pagina}: {e}')
         return None
 
-def parse_imovel(imovel):
+def parsear_imovel(imovel):
     """Extrai informações de um imóvel específico a partir do HTML."""
     try:
         titulo = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 fdybXW'}).text.strip()
@@ -76,19 +79,31 @@ def parse_imovel(imovel):
         logging.warning(f'Erro ao extrair dados do imóvel: {e}')
         return None
 
-def process_page_content(content):
+def processar_conteudo_pagina(conteudo):
     """Processa o conteúdo HTML da página e extrai dados dos imóveis."""
-    site = BeautifulSoup(content, 'html.parser')
+    site = BeautifulSoup(conteudo, 'html.parser')
     imoveis = site.findAll('a', attrs={'class': 'sc-613ef922-1 iJQgSL'})
-    data = [parse_imovel(imovel) for imovel in imoveis]
+    data = [parsear_imovel(imovel) for imovel in imoveis]
     return [item for item in data if item]
 
-def extract_additional_info(session, link):
-    """Extrai informações adicionais de um imóvel a partir do link."""
+def salvar_html_temp(sessao, link, dir_temp):
+    """Salva o HTML de um link temporariamente."""
     try:
-        response = session.get(link)
+        response = sessao.get(link)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        html_path = os.path.join(dir_temp, f"{link.split('/')[-1]}.html")
+        with open(html_path, 'w', encoding='utf-8') as file:
+            file.write(response.text)
+        return html_path
+    except requests.exceptions.RequestException as e:
+        logging.error(f'Erro ao acessar o link {link}: {e}')
+        return None
+
+def extrair_informacoes_adicionais(html_path):
+    """Extrai informações adicionais de um imóvel a partir do HTML salvo."""
+    try:
+        with open(html_path, 'r', encoding='utf-8') as file:
+            soup = BeautifulSoup(file, 'html.parser')
         
         endereco = soup.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
         descricao = soup.find('p', attrs={'class': 'sc-e9fa241f-1 fAJgAs'})
@@ -118,71 +133,85 @@ def extract_additional_info(session, link):
             'Mobilia': mobilia,
             'Amenidades': amenidades
         }
-    except requests.exceptions.RequestException as e:
-        logging.error(f'Erro ao acessar o link {link}: {e}')
+    except Exception as e:
+        logging.error(f'Erro ao processar o arquivo {html_path}: {e}')
         return None
 
 def main():
     """Função principal que executa o scraping e processa os dados."""
     inicio = time.time()
-    session = configure_session()
-    all_data = []
 
-    # Extrair dados das páginas
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(extract_page_data, session, page): page for page in range(1, 340)}
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
-            content = future.result()
-            if content:
-                all_data.extend(process_page_content(content))
+    # Usando context manager para garantir que a sessão seja fechada corretamente
+    with configurar_sessao() as sessao:
+        todos_dados = []
 
-    # Filtrando dados nulos
-    all_data = [data for data in all_data if data]
+        # Extrair dados das páginas
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 3500)}
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
+                conteudo = future.result()
+                if conteudo:
+                    todos_dados.extend(processar_conteudo_pagina(conteudo))
 
-    # Criação do DataFrame inicial
-    df_imovel = pd.DataFrame(all_data)
+        # Filtrando dados nulos
+        todos_dados = [dados for dados in todos_dados if dados]
 
-    # Converte as colunas para valores numéricos, preenchendo com NaN onde não for possível
-    df_imovel['Preço'] = pd.to_numeric(df_imovel['Preço'], errors='coerce')
-    df_imovel['Metro Quadrado'] = pd.to_numeric(df_imovel['Metro Quadrado'], errors='coerce')
-    df_imovel['Quarto'] = pd.to_numeric(df_imovel['Quarto'], errors='coerce')
-    df_imovel['Vaga'] = pd.to_numeric(df_imovel['Vaga'], errors='coerce')
+        # Criação do DataFrame inicial
+        df_imovel = pd.DataFrame(todos_dados)
 
-    # Adiciona nova coluna 'M2' e calcula a divisão
-    df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Metro Quadrado']
+        # Converte as colunas para valores numéricos, preenchendo com NaN onde não for possível
+        df_imovel['Preço'] = pd.to_numeric(df_imovel['Preço'], errors='coerce')
+        df_imovel['Metro Quadrado'] = pd.to_numeric(df_imovel['Metro Quadrado'], errors='coerce')
+        df_imovel['Quarto'] = pd.to_numeric(df_imovel['Quarto'], errors='coerce')
+        df_imovel['Vaga'] = pd.to_numeric(df_imovel['Vaga'], errors='coerce')
 
-    # Remover linhas onde 'Preço' ou 'Metro Quadrado' são 0, nulos ou vazios
-    df_imovel.dropna(subset=['Preço', 'Metro Quadrado'], inplace=True)
-    df_imovel = df_imovel[(df_imovel['Preço'] != 0) & (df_imovel['Metro Quadrado'] != 0)]
-    
-    # Substituir os valores vazios por 0 nas colunas especificadas
-    colunas_para_preencher = ["Preço", "Metro Quadrado", "Quarto", "Vaga", "M2"]
-    df_imovel[colunas_para_preencher] = df_imovel[colunas_para_preencher].fillna(0)
+        # Adiciona nova coluna 'M2' e calcula a divisão
+        df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Metro Quadrado']
 
-    # Extração de informações adicionais
-    additional_data = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(extract_additional_info, session, link): link for link in df_imovel['Link']}
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando links adicionais"):
-            additional_info = future.result()
-            if additional_info:
-                additional_data.append(additional_info)
+        # Remover linhas onde 'Preço' ou 'Metro Quadrado' são 0, nulos ou vazios
+        df_imovel.dropna(subset=['Preço', 'Metro Quadrado'], inplace=True)
+        df_imovel = df_imovel[(df_imovel['Preço'] != 0) & (df_imovel['Metro Quadrado'] != 0)]
+        
+        # Substituir os valores vazios por 0 nas colunas especificadas
+        colunas_para_preencher = ["Preço", "Metro Quadrado", "Quarto", "Vaga", "M2"]
+        df_imovel[colunas_para_preencher] = df_imovel[colunas_para_preencher].fillna(0)
 
-    additional_df = pd.DataFrame(additional_data)
-    df_imovel = pd.concat([df_imovel.reset_index(drop=True), additional_df.reset_index(drop=True)], axis=1)
+        # Criar diretório temporário para salvar os arquivos HTML
+        with tempfile.TemporaryDirectory() as dir_temp:
+            # Baixar e salvar HTML de cada link
+            html_paths = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                futures = {executor.submit(salvar_html_temp, sessao, link, dir_temp): link for link in df_imovel['Link']}
+                for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando HTMLs"):
+                    html_path = future.result()
+                    if html_path:
+                        html_paths.append(html_path)
 
-    # Expand amenities into separate columns
-    all_amenities = set([amenidade for sublist in df_imovel['Amenidades'].dropna() for amenidade in sublist])
-    for amenity in all_amenities:
-        df_imovel[amenity] = df_imovel['Amenidades'].apply(lambda x: 1 if amenity in x else 0)
-    df_imovel.drop(columns=['Amenidades'], inplace=True)
+            # Extrair informações adicionais dos arquivos HTML salvos
+            dados_adicionais = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                futures = {executor.submit(extrair_informacoes_adicionais, html_path): html_path for html_path in html_paths}
+                for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando HTMLs"):
+                    info_adicional = future.result()
+                    if info_adicional:
+                        dados_adicionais.append(info_adicional)
 
-    # Reorder the columns
-    column_order = ['Título', 'Subtítulo', 'Link', 'Preço', 'Metro Quadrado', 'Quarto', 'Vaga', 'Banheiro', 'Suíte', 'Mobilia', 'Tipo', 'Descrição', 'Endereço', 'M2'] + list(all_amenities)
-    df_imovel = df_imovel[column_order]
-    
-    # Write DataFrame to Excel file
-    df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\credito_real_data_base\credito_real_venda_06_2024.xlsx', index=False)
+        df_adicional = pd.DataFrame(dados_adicionais)
+        df_imovel = pd.concat([df_imovel.reset_index(drop=True), df_adicional.reset_index(drop=True)], axis=1)
+
+        # Expandir amenities em colunas separadas
+        todas_amenidades = set(amenidade for sublista in df_imovel['Amenidades'].dropna() for amenidade in sublista)
+        for amenidade in todas_amenidades:
+            df_imovel[amenidade] = df_imovel['Amenidades'].apply(lambda x: 1 if amenidade in x else 0)
+        df_imovel.drop(columns=['Amenidades'], inplace=True)
+
+        # Reordenar as colunas
+        ordem_colunas = ['Título', 'Subtítulo', 'Link', 'Preço', 'Metro Quadrado', 'Quarto', 'Vaga', 'Banheiro', 'Suíte', 'Mobilia', 'Tipo', 'Descrição', 'Endereço', 'M2'] + list(todas_amenidades)
+        df_imovel = df_imovel[ordem_colunas]
+        
+        # Gravar DataFrame em um arquivo Excel
+        caminho_arquivo = Path(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\credito_real_data_base\credito_real_vendax_06_2024.xlsx')
+        df_imovel.to_excel(caminho_arquivo, index=False)
 
     fim = time.time()
     tempo_total_segundos = fim - inicio
