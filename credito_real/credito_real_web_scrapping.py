@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Headers customizados
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-    'Referer': 'https://www.imovelweb.com.br/',
+    'Referer': 'https://www.creditoreal.com.br',
 }
 
 def configure_session():
@@ -22,7 +22,7 @@ def configure_session():
     return session
 
 def extract_page_data(session, page):
-    url = f'https://www.creditoreal.com.br/vendas?page={page}'
+    url = f'https://www.creditoreal.com.br/alugueis/porto-alegre-rs?cityState=porto-alegre-rs&page={page}'
     try:
         response = session.get(url)
         response.raise_for_status()
@@ -80,7 +80,7 @@ def main():
     all_data = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(extract_page_data, session, page): page for page in range(1, 3440)}
+        futures = {executor.submit(extract_page_data, session, page): page for page in range(1, 237)}
         for future in concurrent.futures.as_completed(futures):
             content = future.result()
             if content:
@@ -106,7 +106,7 @@ def main():
     df_imovel[colunas_para_preencher] = df_imovel[colunas_para_preencher].fillna(0)
 
     # Write DataFrame to Excel file
-    df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\credito_real_data_base\credito_real_venda_06_2024.xlsx', index=False)
+    df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\credito_real_data_base\credito_real_porto_alegre_aluguel_06_2024_scrapping_normal.xlsx', index=False)
 
     fim = time.time()
     tempo_total_segundos = fim - inicio
