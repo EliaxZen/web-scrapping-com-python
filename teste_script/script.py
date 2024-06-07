@@ -1,4 +1,6 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
@@ -8,8 +10,8 @@ import logging
 import concurrent.futures
 from tqdm import tqdm
 from pathlib import Path
-import tempfile
 import os
+import tempfile
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,13 +19,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Headers customizados
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-    'Referer': 'https://www.imovelweb.com.br/',
+    'Referer': 'https://www.creditoreal.com.br/',
 }
 
 def configurar_sessao():
     """Configura a sessão de requests com headers customizados."""
     session = requests.Session()
     session.headers.update(HEADERS)
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=100, pool_maxsize=100)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
     return session
 
 def extrair_dados_pagina(sessao, pagina):
@@ -86,23 +97,22 @@ def processar_conteudo_pagina(conteudo):
     data = [parsear_imovel(imovel) for imovel in imoveis]
     return [item for item in data if item]
 
-def salvar_html_temp(sessao, link, dir_temp):
-    """Salva o HTML de um link temporariamente."""
+def baixar_html(sessao, link):
+    """Baixa o conteúdo HTML de um link específico e salva em um arquivo temporário."""
     try:
         response = sessao.get(link)
         response.raise_for_status()
-        html_path = os.path.join(dir_temp, f"{link.split('/')[-1]}.html")
-        with open(html_path, 'w', encoding='utf-8') as file:
-            file.write(response.text)
-        return html_path
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
+            tmp_file.write(response.content)
+            return tmp_file.name
     except requests.exceptions.RequestException as e:
         logging.error(f'Erro ao acessar o link {link}: {e}')
         return None
 
-def extrair_informacoes_adicionais(html_path):
-    """Extrai informações adicionais de um imóvel a partir do HTML salvo."""
+def extrair_informacoes_adicionais(filepath):
+    """Extrai informações adicionais de um imóvel a partir do arquivo HTML salvo."""
     try:
-        with open(html_path, 'r', encoding='utf-8') as file:
+        with open(filepath, 'r', encoding='utf-8') as file:
             soup = BeautifulSoup(file, 'html.parser')
         
         endereco = soup.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
@@ -117,10 +127,10 @@ def extrair_informacoes_adicionais(html_path):
             texto = detalhe.text.lower()
             if 'banheiro' in texto:
                 banheiro = re.search(r'(\d+)', texto).group(1)
-            elif 'suíte' in texto:
+            elif 'suite' in texto:
                 suite = re.search(r'(\d+)', texto).group(1)
             elif 'mobilia' in texto:
-                mobilia = 1 if 'sem' not in texto else 0
+                mobilia = 1 if 'Sem' not in texto else 0
 
         div_amenidades = soup.find('div', attrs={'class': 'sc-b953b8ee-4 sFtII'})
         amenidades = [amenidade.text.strip() for amenidade in div_amenidades.findAll('div', attrs={'class': 'sc-c019b9bb-0 iZYuDq'})] if div_amenidades else []
@@ -134,7 +144,7 @@ def extrair_informacoes_adicionais(html_path):
             'Amenidades': amenidades
         }
     except Exception as e:
-        logging.error(f'Erro ao processar o arquivo {html_path}: {e}')
+        logging.error(f'Erro ao extrair dados do arquivo {filepath}: {e}')
         return None
 
 def main():
@@ -147,7 +157,7 @@ def main():
 
         # Extrair dados das páginas
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 3500)}
+            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 50)}
             for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
                 conteudo = future.result()
                 if conteudo:
@@ -159,68 +169,53 @@ def main():
         # Criação do DataFrame inicial
         df_imovel = pd.DataFrame(todos_dados)
 
-        # Converte as colunas para valores numéricos, preenchendo com NaN onde não for possível
-        df_imovel['Preço'] = pd.to_numeric(df_imovel['Preço'], errors='coerce')
-        df_imovel['Metro Quadrado'] = pd.to_numeric(df_imovel['Metro Quadrado'], errors='coerce')
-        df_imovel['Quarto'] = pd.to_numeric(df_imovel['Quarto'], errors='coerce')
-        df_imovel['Vaga'] = pd.to_numeric(df_imovel['Vaga'], errors='coerce')
+        # Função para limpar e converter colunas numéricas
+        def limpar_converter_coluna(coluna):
+            df_imovel[coluna] = pd.to_numeric(df_imovel[coluna], errors='coerce')
+            df_imovel[coluna].fillna(0, inplace=True)
+
+        # Limpeza e conversão das colunas numéricas
+        colunas_numericas = ['Preço', 'Metro Quadrado', 'Quarto', 'Vaga']
+        for coluna in colunas_numericas:
+            limpar_converter_coluna(coluna)
 
         # Adiciona nova coluna 'M2' e calcula a divisão
         df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Metro Quadrado']
+        df_imovel['M2'].fillna(0, inplace=True)
 
-        # Remover linhas onde 'Preço' ou 'Metro Quadrado' são 0, nulos ou vazios
-        df_imovel.dropna(subset=['Preço', 'Metro Quadrado'], inplace=True)
-        df_imovel = df_imovel[(df_imovel['Preço'] != 0) & (df_imovel['Metro Quadrado'] != 0)]
-        
-        # Substituir os valores vazios por 0 nas colunas especificadas
-        colunas_para_preencher = ["Preço", "Metro Quadrado", "Quarto", "Vaga", "M2"]
-        df_imovel[colunas_para_preencher] = df_imovel[colunas_para_preencher].fillna(0)
+        html_files = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(baixar_html, sessao, imovel['Link']): imovel['Link'] for imovel in todos_dados}
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando páginas adicionais"):
+                html_file = future.result()
+                if html_file:
+                    html_files.append(html_file)
 
-        # Criar diretório temporário para salvar os arquivos HTML
-        with tempfile.TemporaryDirectory() as dir_temp:
-            # Baixar e salvar HTML de cada link
-            html_paths = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                futures = {executor.submit(salvar_html_temp, sessao, link, dir_temp): link for link in df_imovel['Link']}
-                for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando HTMLs"):
-                    html_path = future.result()
-                    if html_path:
-                        html_paths.append(html_path)
+        # Extrair informações adicionais dos imóveis
+        informacoes_adicionais = []
+        for file in tqdm(html_files, desc="Processando informações adicionais"):
+            info = extrair_informacoes_adicionais(file)
+            if info:
+                informacoes_adicionais.append(info)
+            os.remove(file)  # Remove o arquivo temporário
 
-            # Extrair informações adicionais dos arquivos HTML salvos
-            dados_adicionais = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                futures = {executor.submit(extrair_informacoes_adicionais, html_path): html_path for html_path in html_paths}
-                for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando HTMLs"):
-                    info_adicional = future.result()
-                    if info_adicional:
-                        dados_adicionais.append(info_adicional)
+        df_adicional = pd.DataFrame(informacoes_adicionais)
 
-        df_adicional = pd.DataFrame(dados_adicionais)
-        df_imovel = pd.concat([df_imovel.reset_index(drop=True), df_adicional.reset_index(drop=True)], axis=1)
-
-        # Expandir amenities em colunas separadas
-        todas_amenidades = set(amenidade for sublista in df_imovel['Amenidades'].dropna() for amenidade in sublista)
+        # Tratamento das amenidades
+        todas_amenidades = set(amenidade for sublist in df_adicional['Amenidades'] for amenidade in sublist)
         for amenidade in todas_amenidades:
-            df_imovel[amenidade] = df_imovel['Amenidades'].apply(lambda x: 1 if amenidade in x else 0)
-        df_imovel.drop(columns=['Amenidades'], inplace=True)
+            df_adicional[amenidade] = df_adicional['Amenidades'].apply(lambda x: 1 if amenidade in x else 0)
+        df_adicional.drop(columns=['Amenidades'], inplace=True)
 
-        # Reordenar as colunas
-        ordem_colunas = ['Título', 'Subtítulo', 'Link', 'Preço', 'Metro Quadrado', 'Quarto', 'Vaga', 'Banheiro', 'Suíte', 'Mobilia', 'Tipo', 'Descrição', 'Endereço', 'M2'] + list(todas_amenidades)
-        df_imovel = df_imovel[ordem_colunas]
+        # Merge dos DataFrames
+        df_imovel = pd.concat([df_imovel, df_adicional], axis=1)
+
+        fim = time.time()
+        logging.info(f'Tempo total: {fim - inicio:.2f} segundos')
+
+        # Salvando o DataFrame final em um arquivo Excel
+        df_imovel.to_excel('imoveis_credito_real.xlsx', index=False)
         
-        # Gravar DataFrame em um arquivo Excel
-        caminho_arquivo = Path(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\credito_real_data_base\credito_real_vendax_06_2024.xlsx')
-        df_imovel.to_excel(caminho_arquivo, index=False)
 
-    fim = time.time()
-    tempo_total_segundos = fim - inicio
-    horas = int(tempo_total_segundos // 3600)
-    tempo_total_segundos %= 3600
-    minutos = int(tempo_total_segundos // 60)
-    segundos = int(tempo_total_segundos % 60)
-
-    logging.info(f'O script demorou {horas} horas, {minutos} minutos e {segundos} segundos para ser executado.')
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
