@@ -199,8 +199,8 @@ def main():
         for coluna in colunas_numericas:
             limpar_converter_coluna(coluna)
 
-        # Salvando DataFrame final
-        df_imovel.to_csv('imoveis_auxiliadora_predial.csv', index=False, encoding='utf-8-sig')
+        # Salvando DataFrame final em Excel
+        df_imovel.to_excel('imoveis_auxiliadora_predial.xlsx', index=False, encoding='utf-8-sig', engine='openpyxl')
 
     fim = time.time()
     logging.info(f'Tempo total de execução: {fim - inicio:.2f} segundos')

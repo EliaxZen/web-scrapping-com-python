@@ -22,7 +22,7 @@ def configure_session():
     return session
 
 def extract_page_data(session, page):
-    url = f'https://www.auxiliadorapredial.com.br/alugar/residencial/rs+porto-alegre?page={page}'
+    url = f'https://www.auxiliadorapredial.com.br/comprar/residencial/rs+porto-alegre?page={page}'
     try:
         response = session.get(url)
         response.raise_for_status()

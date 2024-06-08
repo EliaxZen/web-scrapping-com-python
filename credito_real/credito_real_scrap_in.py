@@ -39,7 +39,7 @@ def configurar_sessao():
 
 def extrair_dados_pagina(sessao, pagina):
     """Extrai o conteúdo HTML de uma página específica."""
-    url = f'https://www.creditoreal.com.br/alugueis/porto-alegre-rs?cityState=porto-alegre-rs&page={pagina}'
+    url = f'https://www.creditoreal.com.br/vendas?page={pagina}'
     try:
         response = sessao.get(url)
         response.raise_for_status()
@@ -51,29 +51,38 @@ def extrair_dados_pagina(sessao, pagina):
 def parsear_imovel(imovel):
     """Extrai informações de um imóvel específico a partir do HTML."""
     try:
-        titulo = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 fdybXW'}).text.strip()
-        link = 'https://www.creditoreal.com.br' + imovel['href']
-        subtitulo = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'}).text.strip()
-        tipo = imovel.find('span', attrs={'class': 'sc-e9fa241f-0 bTpAju imovel-type'}).text.strip()
-        preco = re.sub(r'\D', '', imovel.find('p', attrs={'class': 'sc-e9fa241f-1 ericyj'}).text)
+        titulo_elem = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 fdybXW'})
+        titulo = titulo_elem.text.strip() if titulo_elem else 'Título não disponível'
+
+        link = 'https://www.creditoreal.com.br' + imovel['href'] if imovel['href'] else 'Link não disponível'
+
+        subtitulo_elem = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
+        subtitulo = subtitulo_elem.text.strip() if subtitulo_elem else 'Subtítulo não disponível'
+
+        tipo_elem = imovel.find('span', attrs={'class': 'sc-e9fa241f-0 bTpAju imovel-type'})
+        tipo = tipo_elem.text.strip() if tipo_elem else 'Tipo não disponível'
+
+        preco_elem = imovel.find('p', attrs={'class': 'sc-e9fa241f-1 ericyj'})
+        preco = re.sub(r'\D', '', preco_elem.text) if preco_elem else '0'
 
         metro_area = imovel.find('div', attrs={'class': 'sc-b308a2c-2 iYXIja'})
         if metro_area:
-            metro_text = metro_area.find('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'}).text.strip()
-            metro_value = float(re.search(r'(\d+)', metro_text).group(1))
+            metro_text_elem = metro_area.find('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'})
+            metro_text = metro_text_elem.text.strip() if metro_text_elem else ''
+            metro_value = float(re.search(r'(\d+)', metro_text).group(1)) if re.search(r'(\d+)', metro_text) else 0
             if 'hectares' in metro_text.lower():
                 metro_value *= 10000
         else:
-            metro_value = None
+            metro_value = 0
 
-        quarto_vaga = metro_area.findAll('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'})
-        quarto, vaga = None, None
+        quarto_vaga = metro_area.findAll('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'}) if metro_area else []
+        quarto, vaga = 0, 0
         for item in quarto_vaga:
             text = item.text.lower()
             if 'quartos' in text:
-                quarto = re.search(r'(\d+)', text).group(1)
+                quarto = int(re.search(r'(\d+)', text).group(1)) if re.search(r'(\d+)', text) else 0
             elif 'vaga' in text:
-                vaga = re.search(r'(\d+)', text).group(1)
+                vaga = int(re.search(r'(\d+)', text).group(1)) if re.search(r'(\d+)', text) else 0
 
         return {
             'Título': titulo,
@@ -115,29 +124,29 @@ def extrair_informacoes_adicionais(filepath):
         with open(filepath, 'r', encoding='utf-8') as file:
             soup = BeautifulSoup(file, 'html.parser')
         
-        endereco = soup.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
-        descricao = soup.find('p', attrs={'class': 'sc-e9fa241f-1 fAJgAs'})
+        endereco_elem = soup.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
+        endereco = endereco_elem.text.strip() if endereco_elem else 'Endereço não disponível'
 
-        endereco_texto = endereco.text.strip() if endereco else None
-        descricao_texto = descricao.text.strip() if descricao else None
+        descricao_elem = soup.find('p', attrs={'class': 'sc-e9fa241f-1 fAJgAs'})
+        descricao = descricao_elem.text.strip() if descricao_elem else 'Descrição não disponível'
 
-        banheiro, suite, mobilia = None, None, 0
+        banheiro, suite, mobilia = 0, 0, 0
         detalhes = soup.findAll('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'})
         for detalhe in detalhes:
             texto = detalhe.text.lower()
             if 'banheiro' in texto:
-                banheiro = re.search(r'(\d+)', texto).group(1)
+                banheiro = int(re.search(r'(\d+)', texto).group(1)) if re.search(r'(\d+)', texto) else 0
             elif 'suite' in texto:
-                suite = re.search(r'(\d+)', texto).group(1)
+                suite = int(re.search(r'(\d+)', texto).group(1)) if re.search(r'(\d+)', texto) else 0
             elif 'mobilia' in texto:
-                mobilia = 1 if 'Sem' not in texto else 0
+                mobilia = 1 if 'sem' not in texto else 0
 
         div_amenidades = soup.find('div', attrs={'class': 'sc-b953b8ee-4 sFtII'})
         amenidades = [amenidade.text.strip() for amenidade in div_amenidades.findAll('div', attrs={'class': 'sc-c019b9bb-0 iZYuDq'})] if div_amenidades else []
 
         return {
-            'Descrição': descricao_texto,
-            'Endereço': endereco_texto,
+            'Descrição': descricao,
+            'Endereço': endereco,
             'Banheiro': banheiro,
             'Suíte': suite,
             'Mobilia': mobilia,
@@ -157,69 +166,34 @@ def main():
 
         # Extrair dados das páginas
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 300)}
+            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 3406)}
             for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
                 conteudo = future.result()
                 if conteudo:
                     todos_dados.extend(processar_conteudo_pagina(conteudo))
 
         # Filtrando dados nulos
-        todos_dados = [dados for dados in todos_dados if dados]
+        todos_dados = [dado for dado in todos_dados if dado is not None]
 
-        # Criação do DataFrame inicial
-        df_imovel = pd.DataFrame(todos_dados)
-
-        html_files = []
+        # Baixar HTML adicional e extrair informações adicionais
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(baixar_html, sessao, imovel['Link']): imovel['Link'] for imovel in todos_dados}
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando páginas adicionais"):
-                html_file = future.result()
-                if html_file:
-                    html_files.append(html_file)
+            futures = {executor.submit(baixar_html, sessao, dado['Link']): dado for dado in todos_dados}
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando HTML adicional"):
+                filepath = future.result()
+                if filepath:
+                    info_adicional = extrair_informacoes_adicionais(filepath)
+                    if info_adicional:
+                        dado_atual = futures[future]
+                        dado_atual.update(info_adicional)
+                    os.remove(filepath)  # Removendo arquivo temporário
 
-        # Extrair informações adicionais dos imóveis
-        informacoes_adicionais = []
-        for file in tqdm(html_files, desc="Processando informações adicionais"):
-            info = extrair_informacoes_adicionais(file)
-            if info:
-                informacoes_adicionais.append(info)
-            os.remove(file)  # Remove o arquivo temporário
-
-        df_adicional = pd.DataFrame(informacoes_adicionais)
-
-        # Tratamento das amenidades
-        todas_amenidades = set(amenidade for sublist in df_adicional['Amenidades'] for amenidade in sublist)
-        for amenidade in todas_amenidades:
-            df_adicional[amenidade] = df_adicional['Amenidades'].apply(lambda x: 1 if amenidade in x else 0)
-        df_adicional.drop(columns=['Amenidades'], inplace=True)
-
-        # Merge dos DataFrames
-        df_imovel = pd.concat([df_imovel, df_adicional], axis=1)
-
-        # Função para limpar e converter colunas numéricas
-        def limpar_converter_coluna(coluna):
-            if coluna in df_imovel.columns:
-                df_imovel[coluna] = pd.to_numeric(df_imovel[coluna], errors='coerce')
-                df_imovel[coluna].fillna(0, inplace=True)
-
-        # Limpeza e conversão das colunas numéricas
-        colunas_numericas = ['Preço', 'Metro Quadrado', 'Quarto', 'Vaga', 'Banheiro', 'Suíte', 'Mobilia']
-        for coluna in colunas_numericas:
-            limpar_converter_coluna(coluna)
-
-        # Adiciona nova coluna 'M2' e calcula a divisão
-        df_imovel['M2'] = df_imovel['Preço'] / df_imovel['Metro Quadrado']
-        df_imovel['M2'].fillna(0, inplace=True)
-
-        # Reordenar colunas
-        colunas_ordem = ['Título', 'Subtítulo', 'Link', 'Preço', 'Metro Quadrado', 'Quarto', 'Vaga', 'Banheiro', 'Suíte', 'Mobilia', 'Tipo', 'Descrição', 'Endereço', 'M2'] + list(todas_amenidades)
-        df_imovel = df_imovel[colunas_ordem]
+        # Criando DataFrame e salvando em arquivo Excel
+        df = pd.DataFrame(todos_dados)
+        df.replace('', np.nan, inplace=True)
+        df.to_excel('dados_imoveis.xlsx', index=False)
 
         fim = time.time()
-        logging.info(f'Tempo total: {fim - inicio:.2f} segundos')
-
-        # Salvando o DataFrame final em um arquivo Excel
-        df_imovel.to_excel(r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\credito_real_data_base\credito_real_porto_alegre_aluguel_06_2024.xlsx', index=False)
+        logging.info(f'Tempo total: {(fim - inicio) / 60:.2f} minutos')
 
 if __name__ == "__main__":
     main()
