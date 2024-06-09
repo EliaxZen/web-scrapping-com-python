@@ -176,7 +176,7 @@ def main():
         todos_dados = [dado for dado in todos_dados if dado is not None]
 
         # Baixar HTML adicional e extrair informações adicionais
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=13) as executor:
             futures = {executor.submit(baixar_html, sessao, dado['Link']): dado for dado in todos_dados}
             for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando HTML adicional"):
                 filepath = future.result()

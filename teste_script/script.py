@@ -14,6 +14,8 @@ import os
 import tempfile
 import asyncio
 import aiohttp
+from multiprocessing import Pool, cpu_count
+from numba import jit, cuda
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -39,8 +41,9 @@ def configurar_sessao():
     session.mount("http://", adapter)
     return session
 
-def extrair_dados_pagina(sessao, pagina):
+def extrair_dados_pagina(args):
     """Extrai o conteúdo HTML de uma página específica."""
+    sessao, pagina = args
     url = f'https://www.creditoreal.com.br/vendas?page={pagina}'
     try:
         response = sessao.get(url)
@@ -50,24 +53,25 @@ def extrair_dados_pagina(sessao, pagina):
         logging.error(f'Erro ao acessar a página {pagina}: {e}')
         return None
 
-def parsear_imovel(imovel):
+@jit(nopython=True)
+def parsear_imovel(imovel_html):
     """Extrai informações de um imóvel específico a partir do HTML."""
     try:
-        titulo_elem = imovel.find('span', class_='sc-e9fa241f-1 fdybXW')
+        titulo_elem = imovel_html.find('span', class_='sc-e9fa241f-1 fdybXW')
         titulo = titulo_elem.text.strip() if titulo_elem else 'Título não disponível'
 
-        link = 'https://www.creditoreal.com.br' + imovel['href'] if imovel.get('href') else 'Link não disponível'
+        link = 'https://www.creditoreal.com.br' + imovel_html['href'] if imovel_html.get('href') else 'Link não disponível'
 
-        subtitulo_elem = imovel.find('span', class_='sc-e9fa241f-1 hqggtn')
+        subtitulo_elem = imovel_html.find('span', class_='sc-e9fa241f-1 hqggtn')
         subtitulo = subtitulo_elem.text.strip() if subtitulo_elem else 'Subtítulo não disponível'
 
-        tipo_elem = imovel.find('span', class_='sc-e9fa241f-0 bTpAju imovel-type')
+        tipo_elem = imovel_html.find('span', class_='sc-e9fa241f-0 bTpAju imovel-type')
         tipo = tipo_elem.text.strip() if tipo_elem else 'Tipo não disponível'
 
-        preco_elem = imovel.find('p', class_='sc-e9fa241f-1 ericyj')
+        preco_elem = imovel_html.find('p', class_='sc-e9fa241f-1 ericyj')
         preco = re.sub(r'\D', '', preco_elem.text) if preco_elem else '0'
 
-        metro_area = imovel.find('div', class_='sc-b308a2c-2 iYXIja')
+        metro_area = imovel_html.find('div', class_='sc-b308a2c-2 iYXIja')
         if metro_area:
             metro_text_elem = metro_area.find('p', class_='sc-e9fa241f-1 jUSYWw')
             metro_text = metro_text_elem.text.strip() if metro_text_elem else ''
@@ -120,10 +124,14 @@ async def baixar_html(session, link):
         logging.error(f'Erro ao acessar o link {link}: {e}')
         return None
 
-async def baixar_html_multiplo(links):
+async def baixar_html_multiplo(links, max_concurrent_downloads=50):
     """Baixa HTML de múltiplos links em paralelo."""
     async with aiohttp.ClientSession(headers=HEADERS) as session:
-        tasks = [baixar_html(session, link) for link in links]
+        semaphore = asyncio.Semaphore(max_concurrent_downloads)
+        async def limited_download(link):
+            async with semaphore:
+                return await baixar_html(session, link)
+        tasks = [limited_download(link) for link in links]
         results = []
         for f in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Baixando HTML"):
             result = await f
@@ -213,12 +221,12 @@ def main():
         todos_dados = []
 
         # Extrair dados das páginas
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 3406)}
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
-                conteudo = future.result()
-                if conteudo:
-                    todos_dados.extend(processar_conteudo_pagina(conteudo))
+        with Pool(cpu_count()) as pool:
+            conteudos_paginas = list(tqdm(pool.imap(extrair_dados_pagina, [(sessao, pagina) for pagina in range(1, 3406)]), total=3406, desc="Baixando páginas"))
+
+        for conteudo in conteudos_paginas:
+            if conteudo:
+                todos_dados.extend(processar_conteudo_pagina(conteudo))
 
         # Filtrando dados nulos
         todos_dados = [dado for dado in todos_dados if dado is not None]
