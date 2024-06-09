@@ -7,15 +7,9 @@ import re
 import numpy as np
 import time
 import logging
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-from pathlib import Path
-import os
-import tempfile
-import asyncio
-import aiohttp
-from multiprocessing import Pool, cpu_count
-from numba import jit, cuda
+from multiprocessing import cpu_count
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -53,7 +47,6 @@ def extrair_dados_pagina(args):
         logging.error(f'Erro ao acessar a página {pagina}: {e}')
         return None
 
-@jit(nopython=True)
 def parsear_imovel(imovel_html):
     """Extrai informações de um imóvel específico a partir do HTML."""
     try:
@@ -112,38 +105,13 @@ def processar_conteudo_pagina(conteudo):
     data = [parsear_imovel(imovel) for imovel in tqdm(imoveis, desc="Processando imóveis")]
     return [item for item in data if item]
 
-async def baixar_html(session, link):
-    """Baixa o conteúdo HTML de um link específico usando aiohttp."""
+def extrair_informacoes_adicionais(link, session):
+    """Extrai informações adicionais de um imóvel a partir de uma URL."""
     try:
-        async with session.get(link) as response:
-            response.raise_for_status()
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
-                tmp_file.write(await response.read())
-                return tmp_file.name
-    except aiohttp.ClientError as e:
-        logging.error(f'Erro ao acessar o link {link}: {e}')
-        return None
-
-async def baixar_html_multiplo(links, max_concurrent_downloads=50):
-    """Baixa HTML de múltiplos links em paralelo."""
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        semaphore = asyncio.Semaphore(max_concurrent_downloads)
-        async def limited_download(link):
-            async with semaphore:
-                return await baixar_html(session, link)
-        tasks = [limited_download(link) for link in links]
-        results = []
-        for f in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Baixando HTML"):
-            result = await f
-            results.append(result)
-        return results
-
-def extrair_informacoes_adicionais(filepath):
-    """Extrai informações adicionais de um imóvel a partir do arquivo HTML salvo."""
-    try:
-        with open(filepath, 'r', encoding='utf-8') as file:
-            soup = BeautifulSoup(file, 'html.parser')
-        
+        response = session.get(link)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+    
         endereco_elem = soup.find('span', class_='sc-e9fa241f-1 hqggtn')
         endereco = endereco_elem.text.strip() if endereco_elem else 'Endereço não disponível'
 
@@ -159,7 +127,7 @@ def extrair_informacoes_adicionais(filepath):
             elif 'suite' in texto:
                 suite = int(re.search(r'(\d+)', texto).group(1)) if re.search(r'(\d+)', texto) else 0
             elif 'mobilia' in texto:
-                mobilia = 1 if 'sem' not in texto else 0
+                mobilia = 1 if 'com' in texto else 0
 
         div_amenidades = soup.find('div', class_='sc-b953b8ee-4 sFtII')
         amenidades = [amenidade.text.strip() for amenidade in div_amenidades.findAll('div', class_='sc-c019b9bb-0 iZYuDq')] if div_amenidades else []
@@ -173,7 +141,7 @@ def extrair_informacoes_adicionais(filepath):
             'Amenidades': amenidades
         }
     except Exception as e:
-        logging.error(f'Erro ao extrair dados do arquivo {filepath}: {e}')
+        logging.error(f'Erro ao extrair dados do link {link}: {e}')
         return None
 
 def tratar_dados(df):
@@ -221,8 +189,8 @@ def main():
         todos_dados = []
 
         # Extrair dados das páginas
-        with Pool(cpu_count()) as pool:
-            conteudos_paginas = list(tqdm(pool.imap(extrair_dados_pagina, [(sessao, pagina) for pagina in range(1, 3406)]), total=3406, desc="Baixando páginas"))
+        with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+            conteudos_paginas = list(tqdm(executor.map(extrair_dados_pagina, [(sessao, pagina) for pagina in range(1, 3406)]), total=3406, desc="Baixando páginas"))
 
         for conteudo in conteudos_paginas:
             if conteudo:
@@ -232,15 +200,14 @@ def main():
         todos_dados = [dado for dado in todos_dados if dado is not None]
 
         # Baixar HTML adicional e extrair informações adicionais
-        links = [dado['Link'] for dado in todos_dados]
-        arquivos_html = asyncio.run(baixar_html_multiplo(links))
+        with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+            infos_adicionais = list(tqdm(executor.map(lambda link: extrair_informacoes_adicionais(link, sessao), 
+                                                      [dado['Link'] for dado in todos_dados]), total=len(todos_dados), desc="Extraindo informações adicionais"))
 
-        for filepath, dado in tqdm(zip(arquivos_html, todos_dados), total=len(todos_dados), desc="Extraindo informações adicionais"):
-            if filepath:
-                info_adicional = extrair_informacoes_adicionais(filepath)
-                if info_adicional:
-                    dado.update(info_adicional)
-                os.remove(filepath)
+        # Atualizar os dados com as informações adicionais
+        for dado, info_adicional in zip(todos_dados, infos_adicionais):
+            if info_adicional:
+                dado.update(info_adicional)
 
         # Criando DataFrame e tratando os dados
         df = pd.DataFrame(todos_dados)
