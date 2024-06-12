@@ -7,11 +7,10 @@ import re
 import numpy as np
 import time
 import logging
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-from pathlib import Path
-import os
-import tempfile
+from multiprocessing import cpu_count
+from cachetools import cached, TTLCache
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,21 +21,28 @@ HEADERS = {
     'Referer': 'https://www.creditoreal.com.br/',
 }
 
+# Variável para definir o número de páginas a serem percorridas
+NUM_PAGINAS = 10 # Altere este valor para o número de páginas desejado
+
+# Cache de TTL para armazenar respostas HTTP (10 minutos)
+cache = TTLCache(maxsize=1000, ttl=600)
+
 def configurar_sessao():
     """Configura a sessão de requests com headers customizados."""
     session = requests.Session()
     session.headers.update(HEADERS)
     retry_strategy = Retry(
-        total=3,
+        total=5,
         backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "OPTIONS"]
     )
-    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=100, pool_maxsize=100)
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=200, pool_maxsize=200)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
 
+@cached(cache)
 def extrair_dados_pagina(sessao, pagina):
     """Extrai o conteúdo HTML de uma página específica."""
     url = f'https://www.creditoreal.com.br/vendas?page={pagina}'
@@ -48,34 +54,34 @@ def extrair_dados_pagina(sessao, pagina):
         logging.error(f'Erro ao acessar a página {pagina}: {e}')
         return None
 
-def parsear_imovel(imovel):
+def parsear_imovel(imovel_html):
     """Extrai informações de um imóvel específico a partir do HTML."""
     try:
-        titulo_elem = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 fdybXW'})
+        titulo_elem = imovel_html.find('span', class_='sc-e9fa241f-1 fdybXW')
         titulo = titulo_elem.text.strip() if titulo_elem else 'Título não disponível'
 
-        link = 'https://www.creditoreal.com.br' + imovel['href'] if imovel['href'] else 'Link não disponível'
+        link = 'https://www.creditoreal.com.br' + imovel_html['href'] if imovel_html.get('href') else 'Link não disponível'
 
-        subtitulo_elem = imovel.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
+        subtitulo_elem = imovel_html.find('span', class_='sc-e9fa241f-1 hqggtn')
         subtitulo = subtitulo_elem.text.strip() if subtitulo_elem else 'Subtítulo não disponível'
 
-        tipo_elem = imovel.find('span', attrs={'class': 'sc-e9fa241f-0 bTpAju imovel-type'})
+        tipo_elem = imovel_html.find('span', class_='sc-e9fa241f-0 bTpAju imovel-type')
         tipo = tipo_elem.text.strip() if tipo_elem else 'Tipo não disponível'
 
-        preco_elem = imovel.find('p', attrs={'class': 'sc-e9fa241f-1 ericyj'})
-        preco = re.sub(r'\D', '', preco_elem.text) if preco_elem else '0'
+        preco_elem = imovel_html.find('p', class_='sc-e9fa241f-1 ericyj')
+        preco = re.sub(r'\D', '', preco_elem.text) if preco_elem and preco_elem.text else '0'
 
-        metro_area = imovel.find('div', attrs={'class': 'sc-b308a2c-2 iYXIja'})
+        metro_area = imovel_html.find('div', class_='sc-b308a2c-2 iYXIja')
+        metro_value = 0
         if metro_area:
-            metro_text_elem = metro_area.find('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'})
+            metro_text_elem = metro_area.find('p', class_='sc-e9fa241f-1 jUSYWw')
             metro_text = metro_text_elem.text.strip() if metro_text_elem else ''
-            metro_value = float(re.search(r'(\d+)', metro_text).group(1)) if re.search(r'(\d+)', metro_text) else 0
-            if 'hectares' in metro_text.lower():
-                metro_value *= 10000
-        else:
-            metro_value = 0
+            if re.search(r'(\d+)', metro_text):
+                metro_value = float(re.search(r'(\d+)', metro_text).group(1))
+                if 'hectares' in metro_text.lower():
+                    metro_value *= 10000
 
-        quarto_vaga = metro_area.findAll('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'}) if metro_area else []
+        quarto_vaga = metro_area.findAll('p', class_='sc-e9fa241f-1 jUSYWw') if metro_area else []
         quarto, vaga = 0, 0
         for item in quarto_vaga:
             text = item.text.lower()
@@ -102,36 +108,26 @@ def parsear_imovel(imovel):
 def processar_conteudo_pagina(conteudo):
     """Processa o conteúdo HTML da página e extrai dados dos imóveis."""
     site = BeautifulSoup(conteudo, 'html.parser')
-    imoveis = site.findAll('a', attrs={'class': 'sc-613ef922-1 iJQgSL'})
-    data = [parsear_imovel(imovel) for imovel in imoveis]  # Correção aqui
+    imoveis = site.findAll('a', class_='sc-613ef922-1 iJQgSL')
+    data = [parsear_imovel(imovel) for imovel in tqdm(imoveis, desc="Processando imóveis")]
     return [item for item in data if item]
 
-def baixar_html(sessao, link):
-    """Baixa o conteúdo HTML de um link específico e salva em um arquivo temporário."""
+@cached(cache)
+def extrair_informacoes_adicionais(sessao, link):
+    """Extrai informações adicionais de um imóvel a partir de uma URL."""
     try:
         response = sessao.get(link)
         response.raise_for_status()
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
-            tmp_file.write(response.content)
-            return tmp_file.name
-    except requests.exceptions.RequestException as e:
-        logging.error(f'Erro ao acessar o link {link}: {e}')
-        return None
-
-def extrair_informacoes_adicionais(filepath):
-    """Extrai informações adicionais de um imóvel a partir do arquivo HTML salvo."""
-    try:
-        with open(filepath, 'r', encoding='utf-8') as file:
-            soup = BeautifulSoup(file, 'html.parser')
-        
-        endereco_elem = soup.find('span', attrs={'class': 'sc-e9fa241f-1 hqggtn'})
+        soup = BeautifulSoup(response.content, 'html.parser')
+    
+        endereco_elem = soup.find('span', class_='sc-e9fa241f-1 hqggtn')
         endereco = endereco_elem.text.strip() if endereco_elem else 'Endereço não disponível'
 
-        descricao_elem = soup.find('p', attrs={'class': 'sc-e9fa241f-1 fAJgAs'})
+        descricao_elem = soup.find('p', class_='sc-e9fa241f-1 fAJgAs')
         descricao = descricao_elem.text.strip() if descricao_elem else 'Descrição não disponível'
 
         banheiro, suite, mobilia = 0, 0, 0
-        detalhes = soup.findAll('p', attrs={'class': 'sc-e9fa241f-1 jUSYWw'})
+        detalhes = soup.findAll('p', class_='sc-e9fa241f-1 jUSYWw')
         for detalhe in detalhes:
             texto = detalhe.text.lower()
             if 'banheiro' in texto:
@@ -139,10 +135,10 @@ def extrair_informacoes_adicionais(filepath):
             elif 'suite' in texto:
                 suite = int(re.search(r'(\d+)', texto).group(1)) if re.search(r'(\d+)', texto) else 0
             elif 'mobilia' in texto:
-                mobilia = 1 if 'sem' not in texto else 0
+                mobilia = 1 if 'Sem' in texto else 0
 
-        div_amenidades = soup.find('div', attrs={'class': 'sc-b953b8ee-4 sFtII'})
-        amenidades = [amenidade.text.strip() for amenidade in div_amenidades.findAll('div', attrs={'class': 'sc-c019b9bb-0 iZYuDq'})] if div_amenidades else []
+        div_amenidades = soup.find('div', class_='sc-b953b8ee-4 sFtII')
+        amenidades = [amenidade.text.strip() for amenidade in div_amenidades.findAll('div', class_='sc-c019b9bb-0 iZYuDq')] if div_amenidades else []
 
         return {
             'Descrição': descricao,
@@ -153,44 +149,92 @@ def extrair_informacoes_adicionais(filepath):
             'Amenidades': amenidades
         }
     except Exception as e:
-        logging.error(f'Erro ao extrair dados do arquivo {filepath}: {e}')
+        logging.error(f'Erro ao extrair dados do link {link}: {e}')
         return None
+
+def tratar_dados(df):
+    """Trata os dados do DataFrame."""
+    try:
+        # Remover caracteres não numéricos e converter colunas para numéricas
+        df['Preço'] = pd.to_numeric(df['Preço'], errors='coerce')
+        df['Metro Quadrado'] = pd.to_numeric(df['Metro Quadrado'], errors='coerce')
+        df['Quarto'] = pd.to_numeric(df['Quarto'], errors='coerce').fillna(0).astype(int)
+        df['Vaga'] = pd.to_numeric(df['Vaga'], errors='coerce').fillna(0).astype(int)
+
+        # Excluir imóveis com preço ou metro quadrado inválidos
+        df = df[(df['Preço'] > 0) & (df['Metro Quadrado'] > 0)]
+
+        # Separar subtítulo em bairro e cidade
+        df[['Bairro', 'Cidade']] = df['Subtítulo'].str.split(', ', expand=True)
+        df.drop(columns=['Subtítulo'], inplace=True)
+
+        # Tratar as amenidades
+        try:
+            todas_amenidades = set()
+            for amenidades in df['Amenidades']:
+                if isinstance(amenidades, list):
+                    todas_amenidades.update(amenidades)
+
+            for amenidade in todas_amenidades:
+                df[amenidade] = df['Amenidades'].apply(lambda x: 1 if isinstance(x, list) and amenidade in x else 0)
+        except Exception as e:
+            logging.error(f'Erro ao processar amenidades: {e}')
+            return df  # Retorna o dataframe mesmo se ocorrer um erro
+
+        df.drop(columns=['Amenidades'], inplace=True)
+
+        # Rearranjar colunas
+        colunas_ordenadas = [
+            'Título', 'Link', 'Preço', 'Metro Quadrado', 'Quarto', 'Banheiro', 'Suíte',
+            'Vaga', 'Mobilia', 'Tipo', 'Bairro', 'Cidade', 'Descrição', 'Endereço'
+        ]
+        colunas_ordenadas += list(todas_amenidades)
+        df = df[colunas_ordenadas]
+
+        df.replace('', np.nan, inplace=True)
+    except Exception as e:
+        logging.error(f'Erro ao tratar dados: {e}')
+
+    return df
 
 def main():
     """Função principal que executa o scraping e processa os dados."""
     inicio = time.time()
 
-    # Usando context manager para garantir que a sessão seja fechada corretamente
     with configurar_sessao() as sessao:
         todos_dados = []
 
         # Extrair dados das páginas
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 3406)}
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
-                conteudo = future.result()
-                if conteudo:
-                    todos_dados.extend(processar_conteudo_pagina(conteudo))
+        with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
+            conteudos_paginas = list(tqdm(executor.map(lambda p: extrair_dados_pagina(sessao, p), range(1, NUM_PAGINAS + 1)), total=NUM_PAGINAS, desc="Baixando páginas"))
+
+        for conteudo in conteudos_paginas:
+            if conteudo:
+                todos_dados.extend(processar_conteudo_pagina(conteudo))
 
         # Filtrando dados nulos
         todos_dados = [dado for dado in todos_dados if dado is not None]
 
         # Baixar HTML adicional e extrair informações adicionais
-        with concurrent.futures.ThreadPoolExecutor(max_workers=13) as executor:
-            futures = {executor.submit(baixar_html, sessao, dado['Link']): dado for dado in todos_dados}
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando HTML adicional"):
-                filepath = future.result()
-                if filepath:
-                    info_adicional = extrair_informacoes_adicionais(filepath)
-                    if info_adicional:
-                        dado_atual = futures[future]
-                        dado_atual.update(info_adicional)
-                    os.remove(filepath)  # Removendo arquivo temporário
+        with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
+            infos_adicionais = list(tqdm(executor.map(lambda link: extrair_informacoes_adicionais(sessao, link), 
+                                                      [dado['Link'] for dado in todos_dados]), total=len(todos_dados), desc="Extraindo informações adicionais"))
 
-        # Criando DataFrame e salvando em arquivo Excel
+        # Atualizar os dados com as informações adicionais
+        for dado, info_adicional in zip(todos_dados, infos_adicionais):
+            if info_adicional:
+                dado.update(info_adicional)
+
+        # Criando DataFrame e tratando os dados
         df = pd.DataFrame(todos_dados)
         df.replace('', np.nan, inplace=True)
-        df.to_excel('dados_imoveis.xlsx', index=False)
+        df = tratar_dados(df)
+
+        # Salvando em arquivo Excel
+        try:
+            df.to_excel('dados_imoveis_tratados.xlsx', index=False)
+        except Exception as e:
+            logging.error(f'Erro ao salvar arquivo Excel: {e}')
 
         fim = time.time()
         logging.info(f'Tempo total: {(fim - inicio) / 60:.2f} minutos')
