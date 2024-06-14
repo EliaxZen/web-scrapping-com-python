@@ -1,142 +1,100 @@
 import time
-from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-import pandas as pd
-from selenium.common.exceptions import StaleElementReferenceException
 
+# Configuração do WebDriver
+options = webdriver.ChromeOptions()
+options.add_argument('--headless')  # Executar em modo headless (sem abrir a janela do navegador)
+options.add_argument('--no-sandbox')
+options.add_argument('--disable-dev-shm-usage')
 
-# Configuração do Selenium com Chrome e WebDriver Manager
-driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+# Instalar e inicializar o WebDriver usando o webdriver-manager
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=options)
 
-lista_de_imoveis = []
+# URL da página principal
+url = "https://refugiosurbanos.com.br/imoveis/"
+driver.get(url)
 
-# URL do site
-driver.get('https://refugiosurbanos.com.br/imoveis')
-
-# Defina o número de vezes que deseja clicar no botão "Carregar mais imóveis"
-num_clicar_carregar_mais = 3
-
-# Função para clicar no botão de carregar mais imóveis
-def carregar_mais_imoveis(driver, num_clicks):
-    for _ in range(num_clicks):
+# Função para carregar todos os imóveis clicando no botão "Carregar mais imóveis"
+def load_all_properties():
+    while True:
         try:
-            # Execute um script JavaScript para rolar a página para baixo
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)  # Espere um pouco para os imóveis serem carregados
+            load_more_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "div#paginador a[data-page]"))
+            )
+            load_more_button.click()
+            time.sleep(2)  # Esperar para carregar os novos imóveis
         except Exception as e:
-            print("Não foi possível carregar mais imóveis:", e)
+            print("Todos os imóveis foram carregados ou ocorreu um erro:", e)
             break
 
-# Clicar no botão de "Carregar mais imóveis" um número específico de vezes
-carregar_mais_imoveis(driver, num_clicar_carregar_mais)
-
-# Loop para extrair informações de todos os imóveis
-while True:
-    # Aguarde até que os imóveis estejam visíveis
-    WebDriverWait(driver, 10).until(
-        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "article.imovel"))
-    )
-    imoveis = driver.find_elements(By.CSS_SELECTOR, "article.imovel")
-
-    for imovel in imoveis:
-        try:
-            link_element = imovel.find_element(By.CSS_SELECTOR, "a[target='_blank']")
-            link_imovel = link_element.get_attribute('href')
-        except StaleElementReferenceException:
-            print("O elemento do link do imóvel se tornou obsoleto. Tentando novamente...")
-            continue  # Continue para a próxima iteração do loop
-        driver.get(link_imovel)
-        # Agora você está na página de detalhes do imóvel e pode extrair as informações
-        page_content = driver.page_source
-        site = BeautifulSoup(page_content, "html.parser")
-
-        # Extraindo o título
-        titulo = site.find('h1', class_='titulo_pagina no-border').get_text(strip=True)
-
-        # Extraindo informações do artigo com detalhes do imóvel
-        detalhes_imovel = site.find('article', id='detalhes_imovel')
-
-        # Extraindo o subtítulo e descrição
-        descricao_imovel = site.find('article', id='descricao_imovel')
-        subtitulo = descricao_imovel.find('h4').get_text(strip=True)
-        descricao = ' '.join([p.get_text(strip=True) for p in descricao_imovel.find_all('p')])
-
-        # Função para extrair informações das tags <h2> e <p>
-        def extrair_informacoes(detalhes_imovel):
-            infos = {}
-            current_header = ''
-            for element in detalhes_imovel.find_all(['h2', 'p']):
-                if element.name == 'h2':
-                    current_header = element.get_text(strip=True)
-                elif element.name == 'p' and current_header:
-                    infos[current_header] = element.get_text(strip=True)
-            return infos
-
-        # Extraindo informações detalhadas
-        informacoes = extrair_informacoes(detalhes_imovel)
-
-        # Extraindo informações detalhadas
-        configuracao = informacoes.get('Configuração')
-        
-        area_util_split = configuracao.split('Área útil: ')
-        area_util = area_util_split[1].split('\n')[0].strip() if len(area_util_split) > 1 else None
-
-        quartos_split = configuracao.split('Quartos')
-        quartos = quartos_split[0].split()[-1].strip() if len(quartos_split) > 1 else None
-
-        suite_split = configuracao.split('Suíte')
-        suite = suite_split[0].split()[-1].strip() if len(suite_split) > 1 else None
-
-        banheiros_split = configuracao.split('Banheiros')
-        banheiros = banheiros_split[0].split()[-1].strip() if len(banheiros_split) > 1 else None
-
-        vaga_split = configuracao.split('Vaga')
-        vaga = vaga_split[0].split()[-1].strip() if len(vaga_split) > 1 else None
-
-        # Organizando as informações no dicionário
-        data = {
-            'Título': titulo,
-            'Subtítulo': subtitulo,
-            'Descrição': descricao,
-            'Bairro': informacoes.get('Bairro'),
-            'Área': area_util,
-            'Quartos': quartos,
-            'Suíte': suite,
-            'Banheiros': banheiros,
-            'Vaga': vaga,
-            'Detalhes': informacoes.get('Detalhes'),
-            'Preço': informacoes.get('Valores').split('Preço: ')[1].split('\n')[0].strip(),
-            'Condomínio': informacoes.get('Valores').split('Condomínio: ')[1].split('<')[0].strip(),
-            'IPTU': informacoes.get('Valores').split('IPTU: ')[1].strip(),
-            'Código RU': informacoes.get('Código RU')
-        }
-
-        # Adicione as informações extraídas à lista_de_imoveis
-        lista_de_imoveis.append(data)
-
-        # Volte para a página principal com a lista de imóveis
-        driver.back()
-
-    # Verifique se existe um botão para carregar mais imóveis e clique nele
+# Função para extrair informações detalhadas de cada imóvel
+def extract_property_details(link):
+    driver.get(link)
+    details = {}
+    
     try:
-        carregar_mais_imoveis(driver)
-    except Exception as e:
-        print("Todos os imóveis foram carregados ou ocorreu um erro:", e)
-        break
+        details['title'] = driver.find_element(By.CSS_SELECTOR, "h1.titulo_pagina.no-border").text
+    except:
+        details['title'] = None
+    
+    try:
+        details['description'] = driver.find_element(By.CSS_SELECTOR, "article#descricao_imovel").text
+    except:
+        details['description'] = None
+    
+    try:
+        details['bairro'] = driver.find_element(By.XPATH, "//article[@id='detalhes_imovel']//h2[text()='Bairro']/following-sibling::p").text
+    except:
+        details['bairro'] = None
+    
+    try:
+        details['area_util'] = driver.find_element(By.XPATH, "//article[@id='detalhes_imovel']//h2[text()='Configuração']/following-sibling::p[1]").text.split("\n")[0]
+    except:
+        details['area_util'] = None
+    
+    try:
+        details['configuracao'] = driver.find_element(By.XPATH, "//article[@id='detalhes_imovel']//h2[text()='Configuração']/following-sibling::p[1]").text
+    except:
+        details['configuracao'] = None
+    
+    try:
+        details['detalhes'] = driver.find_element(By.XPATH, "//article[@id='detalhes_imovel']//h2[text()='Detalhes']/following-sibling::p").text
+    except:
+        details['detalhes'] = None
+    
+    try:
+        details['valores'] = driver.find_element(By.XPATH, "//article[@id='detalhes_imovel']//h2[text()='Valores']/following-sibling::p").text
+    except:
+        details['valores'] = None
+    
+    try:
+        details['codigo_ru'] = driver.find_element(By.XPATH, "//article[@id='detalhes_imovel']//h2[text()='Código RU']/following-sibling::p").text
+    except:
+        details['codigo_ru'] = None
+    
+    return details
 
-# Feche o navegador
+# Carregar todos os imóveis
+load_all_properties()
+
+# Obter todos os links dos imóveis
+property_links = [element.get_attribute('href') for element in driver.find_elements(By.CSS_SELECTOR, "article.imovel a[target='_blank']")]
+
+# Extrair informações detalhadas de cada imóvel
+properties = []
+for link in property_links:
+    properties.append(extract_property_details(link))
+    time.sleep(1)  # Espera para evitar sobrecarga do servidor
+
+# Encerrar o driver
 driver.quit()
 
-# Converta a lista_de_imoveis em um DataFrame
-df_imoveis = pd.DataFrame(lista_de_imoveis)
-
-# Salvar o DataFrame em um arquivo Excel
-nome_arquivo = 'lista_de_imoveis.xlsx'
-df_imoveis.to_excel(nome_arquivo, index=False)
-
-print(f'Os dados foram salvos com sucesso no arquivo {nome_arquivo}.')
+# Exibir as informações extraídas
+for property in properties:
+    print(property)
