@@ -16,7 +16,7 @@ HEADERS = {
 }
 
 # URL base e número de páginas
-BASE_URL = 'https://www.dfimoveis.com.br/aluguel/df/todos/imoveis?pagina='
+BASE_URL = 'https://www.dfimoveis.com.br/venda/df/todos/imoveis?pagina='
 NUM_PAGES = 244
 
 def fetch_page(session, page):
@@ -154,7 +154,7 @@ def main():
     df_imovel['Tipo'] = df_imovel['Link'].apply(extrair_tipo)
 
     # Salvar DataFrame em um arquivo Excel
-    output_path = r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\df_imoveis_data_base\df_imoveis_df_aluguel_06_2024.xlsx'
+    output_path = r'C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\df_imoveis_data_base\df_imoveis_df_venda_06_2024.xlsx'
     df_imovel.to_excel(output_path, index=False)
 
     logging.info(f'Dados salvos em {output_path}')
