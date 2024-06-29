@@ -1,88 +1,80 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import concurrent.futures
 from tqdm import tqdm
-from multiprocessing import cpu_count
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import re
+import os
+import logging
 import numpy as np
-from cachetools import cached, TTLCache
+import tempfile
 
-# Configurações de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Headers customizados
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/58.0.3029.110 Safari/537.3',
-    'Referer': 'https://www.franciosi.com.br/',
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
 
-# Variável para definir o número de páginas a serem percorridas
-NUM_PAGINAS = 400  # Altere este valor para o número de páginas desejado
-
-# Cache de TTL para armazenar respostas HTTP (10 minutos)
-cache = TTLCache(maxsize=1000, ttl=600)
-
 def configurar_sessao():
-    """Configura a sessão de requests com headers customizados."""
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    retry_strategy = Retry(
-        total=5,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS"]
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=200, pool_maxsize=200)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+    sessao = requests.Session()
+    sessao.headers.update(headers)
+    adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100)
+    sessao.mount('http://', adapter)
+    sessao.mount('https://', adapter)
+    return sessao
 
-@cached(cache)
-def extrair_dados_pagina(sessao, pagina):
-    """Extrai o conteúdo HTML de uma página específica."""
+def extrair_dados_pagina(sessao, pagina, tentativas=3):
     url = f'https://www.franciosi.com.br/pesquisa-de-imoveis/?locacao_venda=V&id_cidade[]=26&finalidade=&dormitorio=&garagem=&vmi=&vma=&ordem=4&&pag={pagina}'
+    for tentativa in range(tentativas):
+        try:
+            response = sessao.get(url)
+            response.raise_for_status()
+            return response.content
+        except requests.exceptions.RequestException as e:
+            logging.error(f'Erro ao acessar a página {pagina}, tentativa {tentativa+1}/{tentativas}: {e}')
+            time.sleep(2)
+    return None
+
+def parsear_imovel(imovel):
     try:
-        response = sessao.get(url)
-        response.raise_for_status()
-        return response.content
-    except requests.exceptions.RequestException as e:
-        logging.error(f'Erro ao acessar a página {pagina}: {e}')
-        return None
+        link_tag = imovel.find('a', href=True)
+        link = 'https://www.franciosi.com.br/' + link_tag['href'] if link_tag else None
 
-def parsear_imovel(imovel_html):
-    """Extrai informações de um imóvel específico a partir do HTML."""
-    try:
-        link_elem = imovel_html.find('a', class_='carousel-cell')
-        link = 'https://www.franciosi.com.br/' + link_elem['href'] if link_elem else 'Link não disponível'
+        preco_tags = imovel.find('div', class_='card-valores')
+        preco_venda, preco_aluguel = None, None
+        if preco_tags:
+            preco_text = preco_tags.text
+            preco_venda = re.sub(r'\D', '', re.search(r'R\$ [\d.,]+ V', preco_text).group()) if re.search(r'R\$ [\d.,]+ V', preco_text) else None
+            preco_aluguel = re.sub(r'\D', '', re.search(r'R\$ [\d.,]+ L', preco_text).group()) if re.search(r'R\$ [\d.,]+ L', preco_text) else None
 
-        preco_venda, preco_aluguel = '0', '0'
-        card_valores = imovel_html.select('.card-valores div')
-        for valor in card_valores:
-            if 'V' in valor.text:
-                preco_venda = valor.text.replace('R$', '').replace('V', '').strip()
-            elif 'L' in valor.text:
-                preco_aluguel = valor.text.replace('R$', '').replace('L', '').strip()
+        endereco_tag = imovel.find('p', class_='card-bairro-cidade my-1 pt-1')
+        endereco_text = endereco_tag.text.strip() if endereco_tag else None
+        bairro, cidade, estado = None, None, None
+        if endereco_text:
+            partes = endereco_text.split(' - ')
+            if len(partes) == 2:
+                bairro = partes[0].strip()
+                cidade_estado = partes[1].split('/')
+                if len(cidade_estado) == 2:
+                    cidade = cidade_estado[0].strip()
+                    estado = cidade_estado[1].strip()
 
-        endereco_elem = imovel_html.find('p', class_='card-bairro-cidade')
-        endereco = endereco_elem.text.strip() if endereco_elem else 'Endereço não disponível'
-        bairro, cidade, estado = (endereco.split(' - ') + [''] * 3)[:3]
+        subtitulo_tag = imovel.find('p', class_='card-texto corta-card-desc my-4')
+        subtitulo = subtitulo_tag.text.strip() if subtitulo_tag else None
 
-        subtitulo_elem = imovel_html.find('p', class_='card-texto')
-        subtitulo = subtitulo_elem.text.strip() if subtitulo_elem else 'Subtítulo não disponível'
-
-        detalhes_elem = imovel_html.find('li', class_='list-group-item')
-        if detalhes_elem:
-            quartos = int(detalhes_elem.find('div', class_='dorm-ico').find_all('span')[1].text.strip()) if detalhes_elem.find('div', class_='dorm-ico') and detalhes_elem.find('div', class_='dorm-ico').find_all('span') else 0
-            suites = int(detalhes_elem.find('div', class_='suites-ico').find_all('span')[1].text.strip()) if detalhes_elem.find('div', class_='suites-ico') and detalhes_elem.find('div', class_='suites-ico').find_all('span') else 0
-            banheiros = int(detalhes_elem.find('div', class_='banh-ico').find_all('span')[1].text.strip()) if detalhes_elem.find('div', class_='banh-ico') and detalhes_elem.find('div', class_='banh-ico').find_all('span') else 0
-            garagens = int(detalhes_elem.find('div', class_='gar-ico').find_all('span')[1].text.strip()) if detalhes_elem.find('div', class_='gar-ico') and detalhes_elem.find('div', class_='gar-ico').find_all('span') else 0
-        else:
-            quartos, suites, banheiros, garagens = 0, 0, 0, 0
+        detalhes_tag = imovel.find_all('li', class_='list-group-item d-flex align-items-center justify-content-center card-itens')
+        quartos, suites, banheiros, garagens = None, None, None, None
+        if detalhes_tag:
+            for detalhe in detalhes_tag:
+                if 'Dorm.' in detalhe.get_text():
+                    quartos = re.sub(r'\D', '', detalhe.find('span').text.strip())
+                elif 'Suítes' in detalhe.get_text():
+                    suites = re.sub(r'\D', '', detalhe.find('span').text.strip())
+                elif 'Banho' in detalhe.get_text():
+                    banheiros = re.sub(r'\D', '', detalhe.find('span').text.strip())
+                elif 'Garagens' in detalhe.get_text():
+                    garagens = re.sub(r'\D', '', detalhe.find('span').text.strip())
 
         return {
             'Link': link,
@@ -92,10 +84,10 @@ def parsear_imovel(imovel_html):
             'Cidade': cidade,
             'Estado': estado,
             'Subtítulo': subtitulo,
-            'Quarto': quartos,
-            'Suíte': suites,
-            'Banheiro': banheiros,
-            'Garagem': garagens
+            'Quartos': quartos,
+            'Suítes': suites,
+            'Banheiros': banheiros,
+            'Garagens': garagens
         }
 
     except AttributeError as e:
@@ -103,101 +95,134 @@ def parsear_imovel(imovel_html):
         return None
 
 def processar_conteudo_pagina(conteudo):
-    """Processa o conteúdo HTML da página e extrai dados dos imóveis."""
     site = BeautifulSoup(conteudo, 'html.parser')
-    imoveis = site.findAll('div', class_='card card-imo')
-    data = [parsear_imovel(imovel) for imovel in tqdm(imoveis, desc="Processando imóveis")]
+    imoveis = site.find_all('div', class_='card card-imo')
+    data = [parsear_imovel(imovel) for imovel in imoveis]
     return [item for item in data if item]
 
-def limpar_valor(valor):
-    """Remove caracteres indesejados de valores numéricos."""
-    valor = re.sub(r'[^\d,]', '', valor)  # Remove tudo exceto dígitos e vírgulas
-    valor = valor.replace('.', '').replace(',', '.')
-    return float(valor) if valor else 0.0
+def baixar_html(sessao, url, tentativas=3):
+    for tentativa in range(tentativas):
+        try:
+            response = sessao.get(url)
+            response.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
+                tmp_file.write(response.content)
+                return tmp_file.name
+        except requests.exceptions.RequestException as e:
+            logging.error(f'Erro ao baixar a página {url}, tentativa {tentativa+1}/{tentativas}: {e}')
+            time.sleep(2)
+    return None
 
-def extrair_informacoes_adicionais(sessao, link):
-    """Extrai informações adicionais de uma página específica do imóvel."""
+def extrair_informacoes_adicionais(filepath):
     try:
-        resposta = sessao.get(link)
-        resposta.raise_for_status()
-        soup = BeautifulSoup(resposta.content, 'html.parser')
+        # First attempt to read the file with 'utf-8' encoding
+        try:
+            with open(filepath, 'r', encoding='utf-8') as file:
+                soup = BeautifulSoup(file, 'html.parser')
+        except UnicodeDecodeError:
+            # If 'utf-8' decoding fails, fallback to 'latin-1' encoding
+            with open(filepath, 'r', encoding='latin-1') as file:
+                soup = BeautifulSoup(file, 'html.parser')
 
-        detalhes = {}
-        for item in soup.select('.property-detail-item'):
-            label = item.select_one('.property-detail-label').get_text(strip=True)
-            valor = item.select_one('.property-detail-value').get_text(strip=True)
-            detalhes[label] = limpar_valor(valor)
+        titulo_tag = soup.find('div', class_='px-3 px-lg-0').find('h1', class_='titulo-imovel')
+        titulo = titulo_tag.text.strip() if titulo_tag else None
 
-        area_terreno = float(detalhes.get('Área do terreno', '0').replace(' m²', ''))
-        area_construida = float(detalhes.get('Área construída', '0').replace(' m²', ''))
-        area_util = float(detalhes.get('Área útil', '0').replace(' m²', ''))
+        tipo_tag = soup.find('div', class_='col-6 col-md-4 col-lg-3 tipo-prop')
+        tipo = tipo_tag.find('strong').text.strip() if tipo_tag else None
 
-        amenidades = [a.get_text(strip=True) for a in soup.select('.amenities-item')]
+        codigo_tag = soup.find('div', class_='col-6 col-md-4 col-lg-3 codigo-imo')
+        codigo = codigo_tag.find('span').text.strip() if codigo_tag else None
+
+        area_terreno_tag = soup.find('div', class_='col-6 col-md-4 col-lg-3 a-terr-ico-imo')
+        area_terreno = re.sub(r'\D', '', area_terreno_tag.find('strong').text) if area_terreno_tag else None
+
+        area_construida_tag = soup.find('div', class_='col-6 col-md-4 col-lg-3 a-const-ico-imo')
+        area_construida = re.sub(r'\D', '', area_construida_tag.find('strong').text) if area_construida_tag else None
+
+        area_util_tag = soup.find('div', class_='col-6 col-md-4 col-lg-3 a-util-ico-imo')
+        area_util = re.sub(r'\D', '', area_util_tag.find('strong').text) if area_util_tag else None
+
+        amenidades_tags = soup.find_all('div', class_='itens-imo')
+        amenidades = [tag.text.strip() for tag in amenidades_tags]
 
         return {
-            'Link': link,
+            'Link': filepath.split('_')[-1].split('.')[0],  # Extracting link ID from filename
+            'Título': titulo,
+            'Tipo': tipo,
+            'Código': codigo,
             'Área Terreno': area_terreno,
             'Área Construída': area_construida,
             'Área Útil': area_util,
             'Amenidades': amenidades
         }
     except Exception as e:
-        logging.error(f"Erro ao extrair dados do link {link}: {e}")
+        logging.error(f'Erro ao extrair dados do arquivo {filepath}: {e}')
         return None
 
-def tratar_dados(df):
-    """Trata os dados do DataFrame, convertendo tipos e lidando com valores ausentes."""
-    try:
-        df['Preço Venda'] = df['Preço Venda'].apply(limpar_valor).astype(float).fillna(0)
-        df['Preço Aluguel'] = df['Preço Aluguel'].apply(limpar_valor).astype(float).fillna(0)
-        df['Quarto'] = pd.to_numeric(df['Quarto'], errors='coerce').fillna(0).astype(int)
-        df['Suíte'] = pd.to_numeric(df['Suíte'], errors='coerce').fillna(0).astype(int)
-        df['Banheiro'] = pd.to_numeric(df['Banheiro'], errors='coerce').fillna(0).astype(int)
-        df['Garagem'] = pd.to_numeric(df['Garagem'], errors='coerce').fillna(0).astype(int)
-        df['Área Terreno'] = pd.to_numeric(df['Área Terreno'], errors='coerce').fillna(0).astype(float)
-        df['Área Construída'] = pd.to_numeric(df['Área Construída'], errors='coerce').fillna(0).astype(float)
-        df['Área Útil'] = pd.to_numeric(df['Área Útil'], errors='coerce').fillna(0).astype(float)
+def processar_amenidades(df, amenidades_col):
+    todas_amenidades = set(amenidades for sublist in amenidades_col for amenidades in sublist)
+    for amenidade in todas_amenidades:
+        if amenidade:
+            df[amenidade] = df['Amenidades'].apply(lambda x: 1 if amenidade in x else 0)
 
-        df['M2 Aluguel'] = df.apply(lambda x: x['Preço Aluguel'] / x['Área Terreno'] if x['Área Terreno'] else 0, axis=1)
-        df['M2 Venda'] = df.apply(lambda x: x['Preço Venda'] / x['Área Terreno'] if x['Área Terreno'] else 0, axis=1)
-
-    except Exception as e:
-        logging.error(f"Erro ao tratar dados: {e}")
-    return df
-
-def coletar_dados_imoveis(sessao):
-    """Coleta dados de imóveis de múltiplas páginas e retorna um DataFrame."""
-    resultados = []
-    with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
-        futuros = [executor.submit(extrair_dados_pagina, sessao, pagina) for pagina in range(1, NUM_PAGINAS + 1)]
-        for futuro in as_completed(futuros):
-            conteudo = futuro.result()
-            if conteudo:
-                resultados.extend(processar_conteudo_pagina(conteudo))
-    
-    df = pd.DataFrame(resultados)
-    df = tratar_dados(df)
-
-    links = df['Link'].tolist()
-    resultados_detalhados = []
-    with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
-        futuros = [executor.submit(extrair_informacoes_adicionais, sessao, link) for link in links]
-        for futuro in as_completed(futuros):
-            resultado = futuro.result()
-            if resultado:
-                resultados_detalhados.append(resultado)
-
-    df_detalhado = pd.DataFrame(resultados_detalhados)
-    df = df.merge(df_detalhado, on='Link', how='left')
-
-    df = tratar_dados(df)
-    return df
+def limpar_converter_coluna(df, coluna):
+    if coluna in df.columns:
+        df[coluna] = df[coluna].str.replace('.', '').str.replace(',', '').str.extract(r'(\d+)').astype(float)
+        df[coluna].fillna(0, inplace=True)
 
 def main():
-    sessao = configurar_sessao()
-    imoveis_data = coletar_dados_imoveis(sessao)
-    imoveis_data.to_excel('dados_imoveis.xlsx', index=False)
-    logging.info("Dados salvos em dados_imoveis.csv")
+    inicio = time.time()
 
-if __name__ == "__main__":
+    sessao = configurar_sessao()
+    todos_dados = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(extrair_dados_pagina, sessao, pagina): pagina for pagina in range(1, 200)}
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processando páginas"):
+            conteudo = future.result()
+            if conteudo:
+                dados_pagina = processar_conteudo_pagina(conteudo)
+                todos_dados.extend(dados_pagina)
+
+    df_imovel = pd.DataFrame(todos_dados)
+
+    html_files = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(baixar_html, sessao, imovel['Link']): imovel['Link'] for imovel in todos_dados if imovel['Link']}
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Baixando páginas adicionais"):
+            html_file = future.result()
+            if html_file:
+                html_files.append(html_file)
+
+    informacoes_adicionais = []
+    for file in tqdm(html_files, desc="Processando informações adicionais"):
+        info = extrair_informacoes_adicionais(file)
+        if info:
+            informacoes_adicionais.append(info)
+        os.remove(file)
+
+    df_adicional = pd.DataFrame(informacoes_adicionais)
+
+    if not df_adicional.empty and 'Link' in df_adicional.columns:
+        df_adicional.set_index('Link', inplace=True)
+        if 'Amenidades' in df_adicional.columns:
+            processar_amenidades(df_adicional, df_adicional['Amenidades'])
+
+    if 'Link' in df_imovel.columns and 'Link' in df_adicional.columns:
+        df_completo = pd.merge(df_imovel, df_adicional, on='Link', how='left')
+        df_completo = df_completo.loc[:, ~df_completo.columns.duplicated()]
+
+        colunas_numericas = ['Preço Venda', 'Preço Aluguel', 'Área Terreno', 'Área Construída', 'Área Útil', 'Quartos', 'Garagens', 'Banheiros', 'Suítes']
+        for coluna in colunas_numericas:
+            limpar_converter_coluna(df_completo, coluna)
+
+        df_completo['M2 Venda'] = df_completo.apply(lambda row: row['Preço Venda'] / row['Área Terreno'] if row['Área Terreno'] > 0 else 0, axis=1)
+        df_completo['M2 Aluguel'] = df_completo.apply(lambda row: row['Preço Aluguel'] / row['Área Terreno'] if row['Área Terreno'] > 0 else 0, axis=1)
+
+        df_completo.to_excel('imoveis_franciosi.xlsx', index=False, engine='openpyxl')
+
+    fim = time.time()
+    logging.info(f'Tempo total de execução: {fim - inicio:.2f} segundos')
+
+if __name__ == '__main__':
     main()
