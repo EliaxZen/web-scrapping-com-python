@@ -19,7 +19,7 @@ url = "https://abreuimoveis.com.br/venda/residencial_comercial/"
 driver.get(url)
 
 # Variável para selecionar quantos imóveis deseja extrair
-NUM_IMOVEIS = 100
+NUM_IMOVEIS = 1000
 
 # Emular a rolagem da página e coletar os dados
 imoveis_extraidos = 0
@@ -153,6 +153,6 @@ df[['Rua', 'Bairro', 'Cidade', 'Estado']] = df['Endereço'].apply(separar_endere
 df["M2"] = df["Preço"] / df["Área"]
 
 # Salvar os dados em um arquivo Excel
-df.to_excel("imoveis.xlsx", index=False)
+df.to_excel(r"C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\base_de_dados_excel\abreu_moveis_data_base/imoveis_nordeste.xlsx", index=False)
 
 print("Dados salvos em imoveis.xlsx")
