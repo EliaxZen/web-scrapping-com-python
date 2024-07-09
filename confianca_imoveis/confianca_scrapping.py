@@ -18,10 +18,10 @@ service = ChromeService(ChromeDriverManager().install())
 driver = webdriver.Chrome(service=service, options=chrome_options)
 
 # URL base com a variável de paginação
-base_url = "https://www.vogelhausimoveis.com.br/imoveis/venda/canoas/-/-/-?filtros&min=0&max=8500000&ordem=desc-valor&pagination={}"
+base_url = "https://confiancaimoveisrs.com.br/imoveis/venda/canoas/-/-/-?filtros&min=0&max=8790898&ordem=desc-valor&pagination={}"
 
 # Quantidade máxima de páginas para scraping
-max_pages = 49
+max_pages = 78
 
 # Lista para armazenar dados extraídos
 imoveis = []
@@ -34,7 +34,7 @@ def limpar_dados(dado):
 def extrair_info(imovel):
     try:
         link_tag = imovel.find_element(By.TAG_NAME, 'a')
-        link = "https://www.vogelhausimoveis.com.br" + link_tag.get_attribute('href') if link_tag else None
+        link = "https://confiancaimoveisrs.com.br" + link_tag.get_attribute('href') if link_tag else None
 
         preco_tag = imovel.find_element(By.CLASS_NAME, 'CardApartament_price__K_2Hc')
         preco = limpar_dados(preco_tag.text.strip().replace("Venda: ", "")) if preco_tag else None
@@ -133,7 +133,7 @@ if imoveis:
     df['M2'] = df['Preco'] / df['Area']
     
     # Salvando os dados em um arquivo Excel
-    df.to_excel('Imoveis_Vogelhaus.xlsx', index=False)
+    df.to_excel('Imoveis_confianca.xlsx', index=False)
     print("Dados salvos em 'Imoveis_Vogelhaus.xlsx'")
 else:
     print("Nenhum dado foi extraído.")
