@@ -1,6 +1,3 @@
-import threading
-from time import sleep
-
 import pandas as pd
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -11,9 +8,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
+from tqdm import tqdm
 from distrito_federal_setor import setores
-
+import time
 
 def extrair_setor(titulo):
     palavras = titulo.split()
@@ -23,82 +20,46 @@ def extrair_setor(titulo):
             return palavra
     return "OUTRO"
 
-
-def print_imoveis_carregados(driver):
-    try:
-        while True:
-            sleep(5)
-            imoveis_carregados = len(
-                driver.find_elements(
-                    By.CSS_SELECTOR, ".card_split_vertically.borderHover"
-                )
-            )
-            print(f"Imóveis carregados: {imoveis_carregados}")
-    except KeyboardInterrupt:
-        pass
-
-
-def scrape_imoveis():
-    opts = Options()
-    opts.add_argument("--headless")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--no-sandbox")
-
-    chrome_options = webdriver.ChromeOptions()
+def configurar_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-software-rasterizer")
     chrome_options.add_argument("--disable-setuid-sandbox")
-    chrome_options.add_argument("--memory-growth=10gb")
-    chrome_options.add_argument("--headless")
+    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()), options=chrome_options
-    )
-
+def scrape_imoveis(driver, num_clicks):
     lista_de_imoveis = []
 
     try:
-        driver.get("https://www.thaisimobiliaria.com.br/imoveis/a-venda")
+        driver.get("https://www.thaisimobiliaria.com.br/imoveis/para-alugar")
 
         driver.execute_script("document.getElementById('cookies-component').remove();")
 
         WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located(
-                (By.CSS_SELECTOR, ".card_split_vertically.borderHover")
-            )
+            EC.visibility_of_element_located((By.CSS_SELECTOR, ".card_split_vertically.borderHover"))
         )
 
-        print_thread = threading.Thread(target=print_imoveis_carregados, args=(driver,))
-        print_thread.start()
-
-        while True:
+        for _ in tqdm(range(num_clicks), desc="Clicando no botão 'Ver Mais'"):
             try:
                 botao_ver_mais = WebDriverWait(driver, 10).until(
-                    EC.visibility_of_element_located(
-                        (By.CSS_SELECTOR, ".btn.btn-md.btn-primary.btn-next")
-                    )
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".btn.btn-md.btn-primary.btn-next"))
                 )
                 botao_ver_mais.click()
-                sleep(0.5)
+                time.sleep(0.5)
             except (NoSuchElementException, TimeoutException):
-                print(
-                    "Botão 'Ver Mais' não encontrado. Todos os imóveis foram carregados."
-                )
+                print("Botão 'Ver Mais' não encontrado. Todos os imóveis foram carregados.")
                 break
 
             # Coletar os dados dos imóveis a cada clique no botão "Ver Mais"
             page_content = driver.page_source
             site = BeautifulSoup(page_content, "html.parser")
-            imoveis = site.find_all(
-                "a", attrs={"class": "card_split_vertically borderHover"}
-            )
+            imoveis = site.find_all("a", attrs={"class": "card_split_vertically borderHover"})
 
             for imovel in imoveis:
-                titulo = imovel.find(
-                    "h2", attrs={"class": "card_split_vertically__location"}
-                )
+                titulo = imovel.find("h2", attrs={"class": "card_split_vertically__location"})
                 titulo_text = titulo.text.strip() if titulo else None
                 setor = extrair_setor(titulo_text)
 
@@ -107,119 +68,61 @@ def scrape_imoveis():
                 tipo = imovel.find("p", attrs={"class": "card_split_vertically__type"})
                 tipo_text = tipo.text.strip() if tipo else None
 
-                preco_area = imovel.find(
-                    "div", attrs={"class": "card_split_vertically__value-container"}
-                )
-                preco = (
-                    preco_area.find(
-                        "p", attrs={"class": "card_split_vertically__value"}
-                    ).text.strip()
-                    if preco_area
-                    else "Preço não especificado"
-                )
-                preco = "".join(
-                    filter(str.isdigit, preco)
-                )  # Remover caracteres não numéricos
+                preco_area = imovel.find("div", attrs={"class": "card_split_vertically__value-container"})
+                preco = preco_area.find("p", attrs={"class": "card_split_vertically__value"}).text.strip() if preco_area else "Preço não especificado"
+                preco = "".join(filter(str.isdigit, preco))
 
-                if (
-                    not preco or preco == "0"
-                ):  # Verificar se o preço está ausente ou igual a zero
-                    continue  # Ignorar este imóvel e passar para o próximo
+                if not preco or preco == "0":
+                    continue
 
-                metro = imovel.find(
-                    "li", attrs={"class": "card_split_vertically__spec"}
-                )
+                metro = imovel.find("li", attrs={"class": "card_split_vertically__spec"})
                 metro_text = metro.text.replace("m²", "").strip() if metro else None
-                metro_text = "".join(
-                    filter(str.isdigit, metro_text)
-                )  # Remover caracteres não numéricos
+                metro_text = "".join(filter(str.isdigit, metro_text))
 
-                # quartos, suíte, banheiros, vagas
-                quarto_suite_banheiro_vaga = imovel.find(
-                    "ul", attrs={"class": "card_split_vertically__specs"}
-                )
+                quarto_suite_banheiro_vaga = imovel.find("ul", attrs={"class": "card_split_vertically__specs"})
                 if quarto_suite_banheiro_vaga:
                     lista = quarto_suite_banheiro_vaga.findAll("li")
-                    quarto = suite = banheiro = vaga = (
-                        0  # Valor padrão 0 para substituir espaços em branco
-                    )
+                    quarto = suite = banheiro = vaga = 0
 
                     for item in lista:
                         text_lower = item.text.lower()
                         if "quarto" in text_lower or "quartos" in text_lower:
-                            quarto = int(
-                                item.text.split()[0]
-                            )  # Apenas o primeiro número
+                            quarto = int(item.text.split()[0])
                         elif "suíte" in text_lower or "suítes" in text_lower:
-                            suite = int(
-                                item.text.split()[0]
-                            )  # Apenas o primeiro número
+                            suite = int(item.text.split()[0])
                         elif "banheiro" in text_lower or "banheiros" in text_lower:
-                            banheiro = int(
-                                item.text.split()[0]
-                            )  # Apenas o primeiro número
+                            banheiro = int(item.text.split()[0])
                         elif "vaga" in text_lower or "vagas" in text_lower:
-                            vaga = int(item.text.split()[0])  # Apenas o primeiro número
+                            vaga = int(item.text.split()[0])
                 else:
                     quarto = suite = banheiro = vaga = 0
 
-                # Adicionar informações à lista de imóveis apenas se não estiverem duplicadas
                 if link not in [imovel[2] for imovel in lista_de_imoveis]:
-                    lista_de_imoveis.append(
-                        [
-                            titulo_text,
-                            tipo_text,
-                            link,
-                            preco,
-                            metro_text,
-                            quarto,
-                            suite,
-                            banheiro,
-                            vaga,
-                            setor,
-                        ]
-                    )
+                    lista_de_imoveis.append([titulo_text, tipo_text, link, preco, metro_text, quarto, suite, banheiro, vaga, setor])
 
         return lista_de_imoveis
 
     except Exception as e:
         print(f"Ocorreu um erro durante o scraping: {e}")
-        return lista_de_imoveis  # Retornar os dados coletados até o momento em caso de erro
+        return lista_de_imoveis
 
     finally:
         driver.quit()
 
-
 def salvar_excel(dataframe):
-    dataframe.to_excel(
-        r"C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\thais_imobiliaria\thais_imobiliaria_venda_com_setores.xlsx",
-        index=False,
-    )
+    dataframe.to_excel(r"C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\thais_imobiliaria\thais_imobiliaria_aluguel.xlsx", index=False)
 
-
-def main():
-    lista_de_imoveis = scrape_imoveis()
+def main(num_clicks):
+    driver = configurar_driver()
+    lista_de_imoveis = scrape_imoveis(driver, num_clicks)
 
     df_imovel = pd.DataFrame(
         lista_de_imoveis,
-        columns=[
-            "Título",
-            "Tipo",
-            "Link",
-            "Preço",
-            "Metro Quadrado",
-            "Quarto",
-            "Suite",
-            "Banheiro",
-            "Vaga",
-            "Setor",
-        ],
+        columns=["Título", "Tipo", "Link", "Preço", "Metro Quadrado", "Quarto", "Suite", "Banheiro", "Vaga", "Setor"]
     )
 
     df_imovel["Preço"] = pd.to_numeric(df_imovel["Preço"], errors="coerce")
-    df_imovel["Metro Quadrado"] = pd.to_numeric(
-        df_imovel["Metro Quadrado"], errors="coerce"
-    )
+    df_imovel["Metro Quadrado"] = pd.to_numeric(df_imovel["Metro Quadrado"], errors="coerce")
     df_imovel["Quarto"] = pd.to_numeric(df_imovel["Quarto"], errors="coerce")
     df_imovel["Suite"] = pd.to_numeric(df_imovel["Suite"], errors="coerce")
     df_imovel["Banheiro"] = pd.to_numeric(df_imovel["Banheiro"], errors="coerce")
@@ -229,14 +132,12 @@ def main():
         print("Existem valores nulos no DataFrame. Lidar com eles conforme necessário.")
 
     df_imovel["M2"] = df_imovel["Preço"] / df_imovel["Metro Quadrado"]
-    df_imovel[["Quarto", "Suite", "Banheiro", "Vaga", "M2"]] = df_imovel[
-        ["Quarto", "Suite", "Banheiro", "Vaga", "M2"]
-    ].fillna(0)
+    df_imovel[["Quarto", "Suite", "Banheiro", "Vaga", "M2"]] = df_imovel[["Quarto", "Suite", "Banheiro", "Vaga", "M2"]].fillna(0)
 
     salvar_excel(df_imovel)
 
     print(df_imovel)
 
-
 if __name__ == "__main__":
-    main()
+    NUM_CLICKS = 400  # Defina o número de cliques desejado
+    main(NUM_CLICKS)
