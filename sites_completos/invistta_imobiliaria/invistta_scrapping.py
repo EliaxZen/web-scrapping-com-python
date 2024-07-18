@@ -33,6 +33,9 @@ driver.implicitly_wait(10)  # Espera implícita
 # Função para extrair e limpar informações de cada imóvel
 def extrair_informacoes(imovel):
     try:
+        # Extrair o link do imóvel
+        link = imovel.find_element(By.XPATH, './ancestor::a').get_attribute('href')
+        
         titulo = imovel.find_element(By.CLASS_NAME, "card-title").text.strip()
         
         endereco_codigo = imovel.find_element(By.CLASS_NAME, "container-endereco")
@@ -60,7 +63,8 @@ def extrair_informacoes(imovel):
             "Preço": preco_str,
             "Área (m²)": area,
             "Quartos": quartos,
-            "Vagas": vagas
+            "Vagas": vagas,
+            "Link": link
         }
     except NoSuchElementException as e:
         logging.error(f"Erro ao extrair informações de um imóvel: {e}")
@@ -100,7 +104,7 @@ def fazer_scraping(url_base, num_paginas):
             # Encontra o botão da próxima página
             botao_proxima_pagina = driver.find_element(By.XPATH, f"//div[@class='container-paginacao']//div[@class='btn-paginacao'][span[text()='{page + 1}']]")
             botao_proxima_pagina.click()
-            time.sleep(5)  # Tempo para garantir que a página carregue
+            time.sleep(2)  # Tempo para garantir que a página carregue
         except NoSuchElementException:
             logging.warning("Botão de próxima página não encontrado. Finalizando scraping.")
             break
@@ -161,4 +165,4 @@ else:
     # Salva os dados em um arquivo Excel
     df.to_excel("invistta_imobiliaria_venda.xlsx", index=False)
 
-    logging.info("Scraping concluído e dados salvos em imoveis.xlsx")
+    logging.info("Scraping concluído e dados salvos em invistta_imobiliaria_venda.xlsx")
