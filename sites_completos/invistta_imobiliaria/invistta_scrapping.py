@@ -113,10 +113,10 @@ def fazer_scraping(url_base, num_paginas):
     return lista_imoveis
 
 # URL base do site
-url_base = "https://www.invisttanegocios.com.br/venda/?"
+url_base = "https://www.invisttanegocios.com.br/aluguel/?"
 
 # Número de cliques no botão de próxima página (defina um valor adequado)
-num_paginas = 38
+num_paginas = 3
 
 # Realiza o scraping
 dados_imoveis = fazer_scraping(url_base, num_paginas)
@@ -163,6 +163,6 @@ else:
     logging.info(df.head())
 
     # Salva os dados em um arquivo Excel
-    df.to_excel("invistta_imobiliaria_venda.xlsx", index=False)
+    df.to_excel("invistta_imobiliaria_aluguel.xlsx", index=False)
 
     logging.info("Scraping concluído e dados salvos em invistta_imobiliaria_venda.xlsx")
