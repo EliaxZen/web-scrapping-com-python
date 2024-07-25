@@ -139,5 +139,5 @@ def main(num_clicks):
     print(df_imovel)
 
 if __name__ == "__main__":
-    NUM_CLICKS = 400  # Defina o número de cliques desejado
+    NUM_CLICKS = 4  # Defina o número de cliques desejado
     main(NUM_CLICKS)
