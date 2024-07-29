@@ -1,126 +1,129 @@
+import csv
+import pandas as pd
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-import pandas as pd
+from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException, TimeoutException
+import logging
+from tqdm import tqdm
 import re
-import os
+import time
 
-# Função para extrair conteúdo numérico de uma string
-def extract_numeric(text):
-    return re.sub(r'[^0-9,]', '', text)
+# Configurando o logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Função para extrair dados de uma única página
-def extract_page_data(soup):
-    properties = soup.find_all('div', class_='card mb-3 sombreado')
-    data = []
+def configurar_driver():
+    """Configura e retorna uma instância do WebDriver."""
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service)
 
-    for prop in properties:
-        try:
-            item_edital = prop.find('h3', class_='card-title').get_text(strip=True).replace('Item : ', '').split('Edital : ')
-            item = item_edital[0].strip()
-            edital = item_edital[1].strip()
-
-            details = prop.find('p', class_='card-text').get_text(separator='\n').split('\n')
-            endereco = details[0].replace('Endereço: ', '').strip()
-            regiao_adm = details[1].replace('Região Adm.: ', '').strip()
-            numero_imoveis = int(details[2].replace('Número de Imóveis: ', '').strip())
-            
-            # Verificando se a string é vazia antes de converter para int
-            area_text = details[3].replace('Área: ', '').replace(' m²', '').strip()
-            area = int(extract_numeric(area_text)) if area_text else 0
-            
-            # Verificando se a string é vazia antes de converter para float
-            preco_text = details[4].replace('Valor do Item: ', '').replace('R$', '').replace('.', '').replace(',', '.').strip()
-            preco = float(extract_numeric(preco_text)) if preco_text else 0.0
-            
-            valor_caucao_text = details[5].replace('Valor da Caução: ', '').replace('R$', '').replace('.', '').replace(',', '.').strip()
-            valor_caucao = float(extract_numeric(valor_caucao_text)) if valor_caucao_text else 0.0
-
-            data.append({
-                'Item': item,
-                'Data Edital': edital,
-                'Endereço': endereco,
-                'Região Adm.': regiao_adm,
-                'Número de Imóveis': numero_imoveis,
-                'Área': area,
-                'Preço': preco,
-                'Valor da Caução': valor_caucao
-            })
-        except (IndexError, ValueError) as e:
-            print(f"Erro ao processar um item: {e}")
-            continue
-
-    return data
-
-# Função para extrair todos os dados navegando pelas páginas até a página limite
-def extract_all_data(driver, base_url, max_pages):
-    driver.get(base_url)
-    all_data = []
-    current_page = 0
-
-    while True:
-        current_page += 1
-        try:
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'card mb-3 sombreado')))
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            all_data.extend(extract_page_data(soup))
-        except Exception as e:
-            print(f"Erro ao extrair dados da página {current_page}: {e}")
-            break
-
-        next_page = driver.find_elements(By.CSS_SELECTOR, 'ul.pagination.pagination-lg.sombreado li a')
-        if len(next_page) > 1 and current_page < max_pages:
-            try:
-                next_page[-1].click()
-                WebDriverWait(driver, 30).until(EC.staleness_of(next_page[-1]))  # Espera até que a página mude
-            except Exception as e:
-                print(f"Erro ao clicar na próxima página: {e}")
-                break
-        else:
-            break
-
-    return all_data
-
-# Configuração do Selenium WebDriver
-options = webdriver.ChromeOptions()
-options.add_argument('--headless')
-
-try:
-    print("Instalando ChromeDriver...")
-
-    chrome_driver_path = r"C:\Users\galva\OneDrive\Documentos\GitHub\web-scrapping-com-python\teste\chromedriver.exe"
-    service = ChromeService(executable_path=chrome_driver_path)
-
-    driver = webdriver.Chrome(service=service, options=options)
-    print("ChromeDriver instalado e driver inicializado.")
-
-    base_url = 'https://comprasonline.terracap.df.gov.br/#'
-    max_pages = 5
-
-    data = extract_all_data(driver, base_url, max_pages)
-
-    if data:
-        df = pd.DataFrame(data)
-        df['Preço'] = pd.to_numeric(df['Preço'], errors='coerce')
-        df['Valor da Caução'] = pd.to_numeric(df['Valor da Caução'], errors='coerce')
-        df = df.dropna(subset=['Preço'])
-        df.fillna(0, inplace=True)
-
-        df.to_excel('leiloes_imoveis_terracap.xlsx', index=False)
-        print('Dados salvos em leiloes_imoveis_terracap.xlsx')
-    else:
-        print("Nenhum dado foi extraído.")
-
-except Exception as e:
-    print(f"Ocorreu um erro: {e}")
-
-finally:
+def aceitar_cookies(driver):
+    """Aceita cookies se o botão estiver presente."""
     try:
-        if driver:
-            driver.quit()
-    except NameError:
-        print("O driver não foi inicializado.")
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, 'cookie-notifier-cta'))
+        ).click()
+        logger.info("Cookies aceitos.")
+    except TimeoutException:
+        logger.info("Botão de cookies não encontrado ou já aceito.")
+
+def tratar_dado(elemento, class_name):
+    """Tenta extrair o texto de um elemento, retorna 'N/A' se não encontrar."""
+    try:
+        return elemento.find_element(By.CLASS_NAME, class_name).text
+    except NoSuchElementException:
+        return "N/A"
+
+def limpar_dado(dado):
+    """Remove todos os caracteres não numéricos de um dado."""
+    return re.sub(r'\D', '', dado)
+
+def extrair_dados(driver):
+    """Extrai dados de imóveis da página atual."""
+    imoveis = driver.find_elements(By.CLASS_NAME, 'property-card__content')
+    dados = []
+
+    for imovel in imoveis:
+        titulo = tratar_dado(imovel, 'property-card__title')
+        endereco = tratar_dado(imovel, 'property-card__address')
+        preco = tratar_dado(imovel, 'property-card__price')
+        area = tratar_dado(imovel, 'property-card__detail-area')
+        quartos = tratar_dado(imovel, 'property-card__detail-room')
+        banheiros = tratar_dado(imovel, 'property-card__detail-bathroom')
+        vagas = tratar_dado(imovel, 'property-card__detail-garage')
+
+        # Limpar e converter os dados numéricos
+        preco = limpar_dado(preco)
+        area = limpar_dado(area) if '-' not in area else "N/A"
+        quartos = limpar_dado(quartos)
+        banheiros = limpar_dado(banheiros)
+        vagas = limpar_dado(vagas)
+
+        dados.append([titulo, endereco, preco, area, quartos, banheiros, vagas])
+
+    return dados
+
+def navegar_para_proxima_pagina(driver):
+    """Navega para a próxima página de resultados."""
+    try:
+        botao_proxima = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//button[contains(@class, "js-change-page") and contains(text(), "Próxima página")]'))
+        )
+        driver.execute_script("arguments[0].scrollIntoView(true);", botao_proxima)
+        botao_proxima.click()
+        return True
+    except (ElementClickInterceptedException, TimeoutException, NoSuchElementException):
+        return False
+
+def main():
+    driver = configurar_driver()
+    url = "https://www.vivareal.com.br/venda/sp/sao-paulo/"
+    driver.get(url)
+
+    aceitar_cookies(driver)
+
+    dados_imoveis = []
+    num_paginas = 41  # Pode alterar esse valor conforme necessário
+    pbar = tqdm(total=num_paginas, desc="Progresso")
+
+    try:
+        for pagina_atual in range(1, num_paginas + 1):
+            dados_imoveis.extend(extrair_dados(driver))
+            
+            if not navegar_para_proxima_pagina(driver):
+                logger.info("Todas as páginas foram processadas ou não foi possível carregar a próxima página.")
+                break
+            
+            pbar.update(1)
+            time.sleep(2)  # Intervalo para evitar sobrecarga no servidor
+
+    except Exception as e:
+        logger.error(f"Erro durante a execução: {e}")
+    finally:
+        pbar.close()
+        driver.quit()
+
+    colunas = ['Título', 'Endereço', 'Preço', 'Área', 'Quartos', 'Banheiros', 'Vagas']
+    df = pd.DataFrame(dados_imoveis, columns=colunas)
+    df['Preço'] = pd.to_numeric(df['Preço'], errors='coerce').fillna(0)
+    df['Área'] = pd.to_numeric(df['Área'], errors='coerce').fillna(0)
+    df['Quartos'] = pd.to_numeric(df['Quartos'], errors='coerce').fillna(0)
+    df['Banheiros'] = pd.to_numeric(df['Banheiros'], errors='coerce').fillna(0)
+    df['Vagas'] = pd.to_numeric(df['Vagas'], errors='coerce').fillna(0)
+    df = df[(df['Preço'] > 0) & (df['Área'] > 0)]
+    df['M2'] = df['Preço'] / df['Área']
+
+    csv_filename = 'imoveis.csv'
+    df.to_csv(csv_filename, index=False, encoding='utf-8')
+    logger.info(f"Dados salvos em {csv_filename}")
+
+    excel_filename = 'imoveis.xlsx'
+    df.to_excel(excel_filename, index=False)
+    logger.info(f"Dados convertidos para Excel e salvos em {excel_filename}")
+
+if __name__ == "__main__":
+    main()
