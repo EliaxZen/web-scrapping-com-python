@@ -3,7 +3,6 @@ import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -11,10 +10,17 @@ from selenium.common.exceptions import NoSuchElementException, ElementClickInter
 import logging
 from tqdm import tqdm
 import re
+import time
+import argparse
 
 # Configurando o logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def configurar_driver():
+    """Configura e retorna uma instância do WebDriver."""
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service)
 
 def aceitar_cookies(driver):
     """Aceita cookies se o botão estiver presente."""
@@ -25,87 +31,28 @@ def aceitar_cookies(driver):
         logger.info("Cookies aceitos.")
     except TimeoutException:
         logger.info("Botão de cookies não encontrado ou já aceito.")
+    except Exception as e:
+        logger.error(f"Erro ao tentar aceitar cookies: {e}")
 
-def tratar_dado(imovel, class_name):
-    """Tenta extrair e limpar o texto de um elemento, retorna 'N/A' se não encontrar."""
+def tratar_dado(elemento, class_name):
+    """Tenta extrair o texto de um elemento, retorna 'N/A' se não encontrar."""
     try:
-        dado = imovel.find_element(By.CLASS_NAME, class_name).text
-        return re.sub(r'\D', '', dado) if 'price' in class_name else dado
+        return elemento.find_element(By.CLASS_NAME, class_name).text
     except NoSuchElementException:
         return "N/A"
+    except Exception as e:
+        logger.error(f"Erro ao tratar dado: {e}")
+        return "N/A"
 
-def extrair_tipo(titulo):
-    """Extrai o tipo do imóvel com base no título."""
-    if not titulo:
-        return "OUTROS"
-    titulo = titulo.lower()
-    if "apartamento" in titulo:
-        return "Apartamento"
-    elif "casa" in titulo:
-        return "Casa"
-    elif "casa-condominio" in titulo:
-        return "Casa Condomínio"
-    elif "galpao" in titulo:
-        return "Galpão"
-    elif "garagem" in titulo:
-        return "Garagem"
-    elif "hotel-flat" in titulo or "flat" in titulo:
-        return "Flat"
-    elif "kitnet" in titulo:
-        return "Kitnet"
-    elif "loja" in titulo:
-        return "Loja"
-    elif "loteamento" in titulo:
-        return "Loteamento"
-    elif "lote-terreno" in titulo:
-        return "Lote Terreno"
-    elif "ponto-comercial" in titulo:
-        return "Ponto Comercial"
-    elif "prédio" in titulo or "predio" in titulo:
-        return "Prédio"
-    elif "sala" in titulo:
-        return "Sala"
-    elif "rural" in titulo:
-        return "Zona Rural"
-    elif "lancamento" in titulo:
-        return "Lançamento"
-    else:
-        return "OUTROS"
+def limpar_dado(dado):
+    """Remove todos os caracteres não numéricos de um dado."""
+    return re.sub(r'\D', '', dado)
 
-# Configurando o WebDriver Manager para gerenciar o ChromeDriver
-options = Options()
-options.add_argument("--headless")  # Executar em modo headless
-options.add_argument("--disable-gpu")  # Desativar GPU
-options.add_argument("--no-sandbox")  # Necessário para algumas configurações do sistema
-options.add_argument("--disable-dev-shm-usage")  # Prevenir problemas de armazenamento
-options.add_argument("--log-level=3")  # Desabilitar logs
-
-service = Service(ChromeDriverManager().install())
-driver = webdriver.Chrome(service=service, options=options)
-
-# URL inicial do site
-url = "https://www.vivareal.com.br/venda/sp/sao-paulo/"
-driver.get(url)
-
-# Aceitar cookies se necessário
-aceitar_cookies(driver)
-
-# Criando uma lista para armazenar os dados
-dados_imoveis = []
-
-# Variável para decidir até qual página seguir
-num_paginas = 41800  # Pode alterar esse valor conforme necessário
-
-# Configurar a barra de progresso
-pbar = tqdm(total=num_paginas, desc="Progresso")
-
-pagina_atual = 1
-
-while pagina_atual <= num_paginas:
-    # Encontrar os elementos que contêm as informações dos imóveis
+def extrair_dados(driver):
+    """Extrai dados de imóveis da página atual."""
     imoveis = driver.find_elements(By.CLASS_NAME, 'property-card__content')
+    dados = []
 
-    # Iterar pelos imóveis e extrair as informações desejadas
     for imovel in imoveis:
         titulo = tratar_dado(imovel, 'property-card__title')
         endereco = tratar_dado(imovel, 'property-card__address')
@@ -115,77 +62,83 @@ while pagina_atual <= num_paginas:
         banheiros = tratar_dado(imovel, 'property-card__detail-bathroom')
         vagas = tratar_dado(imovel, 'property-card__detail-garage')
 
-        # Determinar o tipo de imóvel
-        tipo = extrair_tipo(titulo)
+        # Limpar e converter os dados numéricos
+        preco = limpar_dado(preco)
+        area = limpar_dado(area) if '-' not in area else "N/A"
+        quartos = limpar_dado(quartos)
+        banheiros = limpar_dado(banheiros)
+        vagas = limpar_dado(vagas)
 
-        # Adicionando os dados do imóvel na lista
-        dados_imoveis.append([titulo, tipo, endereco, preco, area, quartos, banheiros, vagas])
+        dados.append([titulo, endereco, preco, area, quartos, banheiros, vagas])
 
-    # Tentar encontrar o botão "Próxima página" para ir para a próxima página
+    return dados
+
+def navegar_para_proxima_pagina(driver):
+    """Navega para a próxima página de resultados."""
     try:
-        botao_proxima = driver.find_element(By.XPATH, '//button[contains(@class, "js-change-page") and contains(text(), "Próxima página")]')
+        botao_proxima = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//button[contains(@class, "js-change-page") and contains(text(), "Próxima página")]'))
+        )
         driver.execute_script("arguments[0].scrollIntoView(true);", botao_proxima)
         botao_proxima.click()
-        
-        # Esperar a URL mudar para a próxima página
-        WebDriverWait(driver, 10).until(
-            EC.url_contains(f"?pagina={pagina_atual + 1}")
-        )
-        
-        pagina_atual += 1
-        pbar.update(1)  # Atualizar a barra de progresso
-    except ElementClickInterceptedException:
-        try:
-            # Tentando fechar a mensagem de cookie
-            botao_cookies = driver.find_element(By.XPATH, '//button[contains(@class, "cookie-notifier__button")]')
-            botao_cookies.click()
-            WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, '//button[contains(@class, "js-change-page") and contains(text(), "Próxima página")]'))
-            ).click()
-            pagina_atual += 1
-            pbar.update(1)  # Atualizar a barra de progresso
-        except NoSuchElementException:
-            logger.warning("Não foi possível encontrar o botão de cookies.")
+        return True
+    except (ElementClickInterceptedException, TimeoutException):
+        logger.warning("Problema ao clicar no botão de próxima página.")
+        return False
     except NoSuchElementException:
-        logger.info("Todas as páginas foram processadas.")
-        break
-    except TimeoutException:
-        logger.warning("A próxima página não carregou a tempo.")
-        break
+        logger.info("Botão de próxima página não encontrado.")
+        return False
+    except Exception as e:
+        logger.error(f"Erro inesperado ao navegar para a próxima página: {e}")
+        return False
 
-# Fechar a barra de progresso
-pbar.close()
+def main(num_paginas):
+    driver = configurar_driver()
+    url = "https://www.vivareal.com.br/venda/sp/sao-paulo/"
+    driver.get(url)
 
-# Fechar o navegador
-driver.quit()
+    aceitar_cookies(driver)
 
-# Definindo o nome das colunas
-colunas = ['Título', 'Tipo', 'Endereço', 'Preço', 'Área', 'Quartos', 'Banheiros', 'Vagas']
+    dados_imoveis = []
+    pbar = tqdm(total=num_paginas, desc="Progresso")
 
-# Convertendo os dados para um DataFrame
-df = pd.DataFrame(dados_imoveis, columns=colunas)
+    try:
+        for pagina_atual in range(1, num_paginas + 1):
+            dados_imoveis.extend(extrair_dados(driver))
+            
+            if not navegar_para_proxima_pagina(driver):
+                logger.info("Todas as páginas foram processadas ou não foi possível carregar a próxima página.")
+                break
+            
+            pbar.update(1)
+            time.sleep(2)  # Intervalo para evitar sobrecarga no servidor
 
-# Convertendo colunas para numéricas e preenchendo valores ausentes com 0
-df['Preço'] = pd.to_numeric(df['Preço'], errors='coerce').fillna(0)
-df['Área'] = pd.to_numeric(df['Área'], errors='coerce').fillna(0)
-df['Quartos'] = pd.to_numeric(df['Quartos'], errors='coerce').fillna(0)
-df['Banheiros'] = pd.to_numeric(df['Banheiros'], errors='coerce').fillna(0)
-df['Vagas'] = pd.to_numeric(df['Vagas'], errors='coerce').fillna(0)
+    except Exception as e:
+        logger.error(f"Erro durante a execução: {e}")
+    finally:
+        pbar.close()
+        driver.quit()
 
-# Excluir imóveis com preço ou área igual a 0
-df = df[(df['Preço'] > 0) & (df['Área'] > 0)]
+    colunas = ['Título', 'Endereço', 'Preço', 'Área', 'Quartos', 'Banheiros', 'Vagas']
+    df = pd.DataFrame(dados_imoveis, columns=colunas)
+    df['Preço'] = pd.to_numeric(df['Preço'], errors='coerce').fillna(0)
+    df['Área'] = pd.to_numeric(df['Área'], errors='coerce').fillna(0)
+    df['Quartos'] = pd.to_numeric(df['Quartos'], errors='coerce').fillna(0)
+    df['Banheiros'] = pd.to_numeric(df['Banheiros'], errors='coerce').fillna(0)
+    df['Vagas'] = pd.to_numeric(df['Vagas'], errors='coerce').fillna(0)
+    df = df[(df['Preço'] > 0) & (df['Área'] > 0)]
+    df['M2'] = df['Preço'] / df['Área']
 
-# Criar a coluna M2
-df['M2'] = df['Preço'] / df['Área']
+    csv_filename = 'imoveis.csv'
+    df.to_csv(csv_filename, index=False, encoding='utf-8')
+    logger.info(f"Dados salvos em {csv_filename}")
 
-# Salvando os dados em um arquivo CSV
-csv_filename = 'imoveis.csv'
-df.to_csv(csv_filename, index=False, encoding='utf-8')
+    excel_filename = 'imoveis.xlsx'
+    df.to_excel(excel_filename, index=False)
+    logger.info(f"Dados convertidos para Excel e salvos em {excel_filename}")
 
-logger.info(f"Dados salvos em {csv_filename}")
-
-# Convertendo o arquivo CSV para Excel
-excel_filename = 'imoveis.xlsx'
-df.to_excel(excel_filename, index=False)
-
-logger.info(f"Dados convertidos para Excel e salvos em {excel_filename}")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Raspagem de dados de imóveis.")
+    parser.add_argument('--paginas', type=int, default=41800, help="Número de páginas a serem processadas")
+    args = parser.parse_args()
+    main(args.paginas)
