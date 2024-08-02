@@ -21,7 +21,7 @@ options.add_argument('--headless')
 driver = webdriver.Chrome(service=service, options=options)
 
 # Navegar até a página principal
-url = "https://www.duailibeimobiliaria.com.br/imoveis/a-venda"
+url = "https://www.duailibeimobiliaria.com.br/imoveis/para-alugar"
 driver.get(url)
 
 # Função para carregar mais imóveis
@@ -163,6 +163,6 @@ df = df[colunas]
 df = df[df['Preço Venda'] > 0]
 
 # Salvar em um arquivo Excel
-df.to_excel('imoveis_duailibe.xlsx', index=False)
+df.to_excel('imoveis_duailibe_aluguel.xlsx', index=False)
 
 logging.info("Dados salvos com sucesso!")

@@ -14,8 +14,8 @@ import logging
 from tqdm import tqdm
 import re
 import time
-import argparse
 import random
+import argparse
 
 # Configurando o logger
 logging.basicConfig(level=logging.INFO)
@@ -26,14 +26,12 @@ def configurar_driver():
     """Configura e retorna uma instância do WebDriver."""
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--headless")  # Executar o Chrome em modo headless
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     )
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
-
-    # Desabilitando imagens para melhorar a velocidade de carregamento
     prefs = {"profile.managed_default_content_settings.images": 2}
     chrome_options.add_experimental_option("prefs", prefs)
 
@@ -44,7 +42,7 @@ def configurar_driver():
 def aceitar_cookies(driver):
     """Aceita cookies se o botão estiver presente."""
     try:
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.ID, "cookie-notifier-cta"))
         ).click()
         logger.info("Cookies aceitos.")
@@ -73,22 +71,23 @@ def limpar_dado(dado):
 def extrair_dados(driver):
     """Extrai dados de imóveis da página atual."""
     imoveis = driver.find_elements(By.CLASS_NAME, "property-card__content")
-    dados = [
-        [
-            tratar_dado(imovel, "property-card__title"),
-            tratar_dado(imovel, "property-card__address"),
-            limpar_dado(tratar_dado(imovel, "property-card__price")),
-            (
-                limpar_dado(tratar_dado(imovel, "property-card__detail-area"))
-                if "-" not in tratar_dado(imovel, "property-card__detail-area")
-                else "N/A"
-            ),
-            limpar_dado(tratar_dado(imovel, "property-card__detail-room")),
-            limpar_dado(tratar_dado(imovel, "property-card__detail-bathroom")),
-            limpar_dado(tratar_dado(imovel, "property-card__detail-garage")),
-        ]
-        for imovel in imoveis
-    ]
+    dados = []
+    for imovel in imoveis:
+        try:
+            titulo = tratar_dado(imovel, "property-card__title")
+            endereco = tratar_dado(imovel, "property-card__address")
+            preco = limpar_dado(tratar_dado(imovel, "property-card__price"))
+            area = tratar_dado(imovel, "property-card__detail-area")
+            area = limpar_dado(area) if "-" not in area else "N/A"
+            quartos = limpar_dado(tratar_dado(imovel, "property-card__detail-room"))
+            banheiros = limpar_dado(
+                tratar_dado(imovel, "property-card__detail-bathroom")
+            )
+            vagas = limpar_dado(tratar_dado(imovel, "property-card__detail-garage"))
+
+            dados.append([titulo, endereco, preco, area, quartos, banheiros, vagas])
+        except Exception as e:
+            logger.error(f"Erro ao processar imóvel: {e}")
     return dados
 
 
@@ -103,7 +102,7 @@ def carregar_pagina(driver, url):
             logger.warning(
                 f"Erro ao carregar a página (tentativa {tentativa + 1}/{max_retentativas}): {e}"
             )
-            time.sleep(random.uniform(1, 2))  # Espera antes de tentar novamente
+            time.sleep(random.uniform(1, 2))
     logger.error("Falha ao carregar a página após múltiplas tentativas.")
     return False
 
@@ -112,9 +111,8 @@ def rolar_ate_o_fim(driver):
     """Rola a página até o final para carregar todos os elementos."""
     altura_inicial = driver.execute_script("return document.body.scrollHeight")
     while True:
-        # Rola até o final da página
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1)  # Espera um pouco para carregar o conteúdo novo
+        time.sleep(1)
         nova_altura = driver.execute_script("return document.body.scrollHeight")
         if nova_altura == altura_inicial:
             break
@@ -124,20 +122,14 @@ def rolar_ate_o_fim(driver):
 def clicar_nas_paginas(driver, pagina):
     """Clica no botão da página específica."""
     try:
-        # Espera até o botão da página específica estar visível e clicável
         botao_pagina = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable(
                 (By.CSS_SELECTOR, f"button.js-change-page[data-page='{pagina}']")
             )
         )
-
-        # Rolar até o botão para garantir que ele esteja visível
         driver.execute_script("arguments[0].scrollIntoView(true);", botao_pagina)
-
-        # Tentar clicar no botão usando JavaScript para evitar possíveis intercepções
         driver.execute_script("arguments[0].click();", botao_pagina)
-
-        time.sleep(2)  # Espera para garantir o carregamento da página
+        time.sleep(1.5)
         return True
     except (
         TimeoutException,
@@ -153,7 +145,7 @@ def clicar_nas_paginas(driver, pagina):
 
 def processar_pagina(driver):
     """Processa uma única página e retorna os dados extraídos."""
-    rolar_ate_o_fim(driver)  # Rola até o final da página antes de extrair os dados
+    rolar_ate_o_fim(driver)
     return extrair_dados(driver)
 
 
@@ -175,12 +167,11 @@ def main(num_paginas, max_imoveis):
                 dados_imoveis.extend(dados_pagina)
                 pbar.update(1)
 
-                # Verifica se o limite de imóveis foi atingido
                 if len(dados_imoveis) >= max_imoveis:
                     logger.info(f"Limite de {max_imoveis} imóveis atingido.")
                     break
 
-                time.sleep(random.uniform(0.5, 1))  # Intervalo mais curto e aleatório
+                time.sleep(random.uniform(0.5, 1))
             else:
                 logger.info(f"Fim da navegação, página {pagina_atual} não acessível.")
                 break
@@ -191,21 +182,17 @@ def main(num_paginas, max_imoveis):
         pbar.close()
         driver.quit()
 
-    # Limitando a quantidade de imóveis ao máximo especificado
     dados_imoveis = dados_imoveis[:max_imoveis]
 
-    # Criar dataframe e salvar resultados
     colunas = ["Título", "Endereço", "Preço", "Área", "Quartos", "Banheiros", "Vagas"]
     df = pd.DataFrame(dados_imoveis, columns=colunas)
 
-    # Otimização no tratamento de dados
     for coluna in ["Preço", "Área", "Quartos", "Banheiros", "Vagas"]:
         df[coluna] = pd.to_numeric(df[coluna], errors="coerce").fillna(0)
 
     df = df[(df["Preço"] > 0) & (df["Área"] > 0)]
     df["M2"] = df["Preço"] / df["Área"]
 
-    # Salvando resultados
     csv_filename = "imoveis.csv"
     df.to_csv(csv_filename, index=False, encoding="utf-8")
     logger.info(f"Dados salvos em {csv_filename}")
